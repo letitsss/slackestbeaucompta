@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>S'Lac'K Est Beau — Devis, factures & compta</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>">
+</head>
+<body>
+
+  <!-- Écran de connexion -->
+  <div id="ecran-login" class="ecran-login cache">
+    <div class="carte-login">
+      <h1>🎪 S'Lac'K Est Beau</h1>
+      <p class="sous-titre">Devis · Factures · Compta · Notes de frais</p>
+      <form id="form-login">
+        <label>Ton prénom
+          <input type="text" id="login-prenom" required autocomplete="given-name" placeholder="ex : Camille">
+        </label>
+        <label>Code d'accès
+          <input type="password" id="login-code" required placeholder="Code trésorier ou bénévole">
+        </label>
+        <button type="submit" class="btn btn-primaire btn-large" id="btn-login">Se connecter</button>
+        <p id="login-erreur" class="erreur cache"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Application -->
+  <div id="app" class="cache">
+    <header class="topbar no-print">
+      <div class="topbar-titre">
+        <strong>🎪 S'Lac'K Est Beau</strong>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="topbar-user">
+        <span id="badge-user" class="badge"></span>
+        <button id="btn-logout" class="btn btn-discret" title="Se déconnecter">Quitter</button>
+      </div>
+    </header>
+    <main id="vue" class="no-print"></main>
+  </div>
+
+  <!-- Zone d'impression (devis / facture) -->
+  <div id="zone-impression" class="print-only"></div>
+
+  <!-- Modale générique -->
+  <div id="modale-fond" class="modale-fond cache no-print">
+    <div id="modale" class="modale"></div>
+  </div>
+
+  <div id="toast" class="toast cache no-print"></div>
+  <div id="chargement" class="chargement cache no-print"><div class="spinner"></div></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
