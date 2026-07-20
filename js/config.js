@@ -6,4 +6,5 @@
 // Exemple :
 // var API_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
 
-var API_URL = 'A_REMPLACER_PAR_URL_APPS_SCRIPT';
+var API_URL = 'https://script.google.com/macros/s/AKfycbx0xiMfa3am4x_jJQl1sHc1PDFiyhwOeUdepLfuyyy_j4ILtt852qSN5k8cjhhMnqLIwg/exec';
+
