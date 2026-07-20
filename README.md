@@ -2,8 +2,8 @@
 
 Outil de gestion pour l'association [S'Lac'K Est Beau](https://slackestbeau.org/) :
 
-- **Devis** avec numérotation automatique (`DEV-2026-001`), conversion en facture en un clic
-- **Factures** sans TVA (mention art. 293 B du CGI), impression / PDF avec logo et RIB
+- **Devis** avec numérotation automatique (`202601` = année + n°, comme vos documents actuels), conversion en facture en un clic
+- **Factures** sans TVA (0 %, association exonérée des impôts commerciaux), impression / PDF reprenant la mise en page Canva de l'asso (logo, IBAN, conditions de paiement, « bon pour accord »)
 - **Notes de frais** des bénévoles avec photo du justificatif (stockée sur le Drive de l'asso)
 - **Compta** simple recettes/dépenses avec export CSV
 - **Bilan annuel** par catégorie, prêt pour l'AG
@@ -70,6 +70,12 @@ Dans le fichier [`js/config.js`](js/config.js), remplacer la valeur par votre UR
 ```js
 var API_URL = 'https://script.google.com/macros/s/XXXXX/exec';
 ```
+
+### Étape 3 bis — Le logo
+
+Exporter le logo depuis Canva en **PNG (fond transparent)** et l'enregistrer dans le projet
+sous **`assets/logo.png`** — il apparaîtra en haut à droite des devis et factures.
+(Un autre chemin ou une URL se règle dans l'appli, onglet Paramètres.)
 
 ### Étape 4 — Publier sur GitHub Pages
 

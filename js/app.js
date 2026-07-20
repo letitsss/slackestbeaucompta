@@ -283,14 +283,16 @@ function vueDevis() {
 function editerDevis(id) {
   var d = id ? etat.devis.find(function (x) { return x.id === id; }) : null;
   var lignes = d ? lignesDe(d) : [{ desc: '', qte: 1, pu: '' }];
+  var conditionsDefaut = etat.config.conditionsPaiement || '';
 
   ouvrirModale(
-    '<h3>' + (d ? 'Modifier le devis ' + echap(d.numero) : 'Nouveau devis') + '</h3>' +
+    '<h3>' + (d ? 'Modifier le devis n°' + echap(d.numero) : 'Nouveau devis') + '</h3>' +
     '<form id="form-devis">' +
     '<div class="grille-form">' +
-    champ('Client / structure *', '<input id="dv-clientNom" required value="' + echap(d ? d.clientNom : '') + '" placeholder="ex : Mairie d\'Annecy">') +
+    champ('Contact client *', '<input id="dv-clientNom" required value="' + echap(d ? d.clientNom : '') + '" placeholder="ex : Marine HOLT">') +
+    champ('Téléphone', '<input id="dv-clientTel" value="' + echap(d ? d.clientTel : '') + '" placeholder="ex : 06 62 04 46 53">') +
     champ('Email client', '<input id="dv-clientEmail" type="email" value="' + echap(d ? d.clientEmail : '') + '">') +
-    champ('Adresse client', '<textarea id="dv-clientAdresse" rows="2">' + echap(d ? d.clientAdresse : '') + '</textarea>', true) +
+    champ('Structure et adresse', '<textarea id="dv-clientAdresse" rows="3" placeholder="ex :\nPRINGY FOLIES\n4890 route de Ferrières\n74370 Annecy">' + echap(d ? d.clientAdresse : '') + '</textarea>') +
     champ('Objet de la prestation *', '<input id="dv-objet" required value="' + echap(d ? d.objet : '') + '" placeholder="ex : Initiation slackline — fête du sport">', true) +
     champ('Date', '<input id="dv-date" type="date" value="' + echap(d ? d.date : aujourdhui()) + '">') +
     champ('Statut', selectStatutDevis(d ? d.statut : 'brouillon')) +
@@ -298,7 +300,12 @@ function editerDevis(id) {
     '<label class="champ-label">Lignes de prestation</label>' +
     '<div id="dv-lignes"></div>' +
     '<button type="button" class="btn btn-petit" onclick="ajouterLigneDevis()">➕ Ajouter une ligne</button>' +
-    '<div class="total-general">Total : <span id="dv-total">0,00 €</span></div>' +
+    '<div class="grille-form" style="margin-top:14px">' +
+    champ('Détails de la prestation (encadré sur le document)', '<textarea id="dv-details" rows="2" placeholder="ex : 2 bénévoles de l\'association installeront 3 racks de slackline et assureront l\'encadrement des initiations de 10h à 18h">' + echap(d ? d.details : '') + '</textarea>', true) +
+    champ('Remise exceptionnelle (€)', '<input id="dv-remise" inputmode="decimal" value="' + echap(d && nombre(d.remise) ? d.remise : '') + '" placeholder="ex : 250">') +
+    champ('Conditions de paiement (sur le devis)', '<textarea id="dv-conditions" rows="2">' + echap(d ? d.conditions : conditionsDefaut) + '</textarea>') +
+    '</div>' +
+    '<div class="total-general"><span class="texte-doux" style="font-size:14px">Sous-total : <span id="dv-soustotal">0,00 €</span> · </span>Total : <span id="dv-total">0,00 €</span> TTC</div>' +
     '<div class="barre-actions">' +
     '<button type="submit" class="btn btn-primaire">💾 Enregistrer</button>' +
     '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
@@ -308,22 +315,29 @@ function editerDevis(id) {
   var conteneur = $('#dv-lignes');
   conteneur.innerHTML = '';
   lignes.forEach(function (l) { ajouterLigneDevis(l); });
+  $('#dv-remise').addEventListener('input', recalculerTotalDevis);
   recalculerTotalDevis();
 
   $('#form-devis').addEventListener('submit', async function (e) {
     e.preventDefault();
+    var lignesSaisies = lireLignesDevis();
+    var remise = nombre($('#dv-remise').value);
     var devis = {
       id: d ? d.id : '',
       numero: d ? d.numero : '',
       date: $('#dv-date').value || aujourdhui(),
       auteur: d ? d.auteur : etat.prenom,
       clientNom: $('#dv-clientNom').value.trim(),
+      clientTel: $('#dv-clientTel').value.trim(),
       clientAdresse: $('#dv-clientAdresse').value.trim(),
       clientEmail: $('#dv-clientEmail').value.trim(),
       objet: $('#dv-objet').value.trim(),
-      lignes: JSON.stringify(lireLignesDevis()),
-      total: totalLignes(lireLignesDevis()),
+      lignes: JSON.stringify(lignesSaisies),
+      details: $('#dv-details').value.trim(),
+      remise: remise,
+      total: totalLignes(lignesSaisies) - remise,
       statut: $('#dv-statut').value,
+      conditions: $('#dv-conditions').value.trim(),
       factureNumero: d ? d.factureNumero : ''
     };
     await action(function () { return Api.saveDevis(devis); }, 'Devis enregistré ✔');
@@ -384,9 +398,10 @@ function recalculerTotalDevis() {
     var t = nombre(div.querySelector('.ld-qte').value) * nombre(div.querySelector('.ld-pu').value);
     div.querySelector('.total-ligne').textContent = euros(t);
   });
-  var total = totalLignes(lireLignesDevis());
-  var el = $('#dv-total');
-  if (el) el.textContent = euros(total);
+  var sousTotal = totalLignes(lireLignesDevis());
+  var remise = $('#dv-remise') ? nombre($('#dv-remise').value) : 0;
+  if ($('#dv-soustotal')) $('#dv-soustotal').textContent = euros(sousTotal);
+  if ($('#dv-total')) $('#dv-total').textContent = euros(sousTotal - remise);
 }
 
 function detailDevis(id) {
@@ -395,14 +410,16 @@ function detailDevis(id) {
   var lignes = lignesDe(d);
 
   ouvrirModale(
-    '<h3>Devis ' + echap(d.numero) + ' — ' + echap(d.clientNom) + ' ' + badgeStatut(d.statut) + '</h3>' +
+    '<h3>Devis n°' + echap(d.numero) + ' — ' + echap(d.clientNom) + ' ' + badgeStatut(d.statut) + '</h3>' +
     '<p class="texte-doux">' + echap(d.objet) + ' · ' + fmtDate(d.date) + ' · créé par ' + echap(d.auteur) + '</p>' +
-    '<div class="conteneur-tableau" style="margin-top:12px"><table><thead><tr><th>Description</th><th class="num">Qté</th><th class="num">PU</th><th class="num">Total</th></tr></thead><tbody>' +
+    '<div class="conteneur-tableau" style="margin-top:12px"><table><thead><tr><th>Description</th><th class="num">Prix</th><th class="num">Quantité</th><th class="num">Total</th></tr></thead><tbody>' +
     lignes.map(function (l) {
-      return '<tr><td>' + echap(l.desc) + '</td><td class="num">' + echap(l.qte) + '</td><td class="num">' + euros(l.pu) + '</td><td class="num">' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
+      return '<tr><td>' + echap(l.desc) + '</td><td class="num">' + euros(l.pu) + '</td><td class="num">' + echap(l.qte) + '</td><td class="num">' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
     }).join('') +
     '</tbody></table></div>' +
-    '<div class="total-general">Total : ' + euros(d.total) + '</div>' +
+    (d.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(d.details) + '</p>' : '') +
+    (nombre(d.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle : −' + euros(d.remise) + '</p>' : '') +
+    '<div class="total-general">Total : ' + euros(d.total) + ' TTC</div>' +
     (d.factureNumero ? '<p class="texte-doux">✅ Facturé — facture ' + echap(d.factureNumero) + '</p>' : '') +
     '<div class="barre-actions">' +
     '<button class="btn btn-primaire" onclick="imprimerDocument(\'devis\', \'' + d.id + '\')">🖨️ Imprimer / PDF</button>' +
@@ -462,15 +479,17 @@ function detailFacture(id) {
   var lignes = lignesDe(f);
 
   ouvrirModale(
-    '<h3>Facture ' + echap(f.numero) + ' — ' + echap(f.clientNom) + ' ' + badgeStatut(f.statut) + '</h3>' +
+    '<h3>Facture n°' + echap(f.numero) + ' — ' + echap(f.clientNom) + ' ' + badgeStatut(f.statut) + '</h3>' +
     '<p class="texte-doux">' + echap(f.objet) + ' · émise le ' + fmtDate(f.date) +
-    (f.devisNumero ? ' · issue du devis ' + echap(f.devisNumero) : '') + '</p>' +
-    '<div class="conteneur-tableau" style="margin-top:12px"><table><thead><tr><th>Description</th><th class="num">Qté</th><th class="num">PU</th><th class="num">Total</th></tr></thead><tbody>' +
+    (f.devisNumero ? ' · issue du devis n°' + echap(f.devisNumero) : '') + '</p>' +
+    '<div class="conteneur-tableau" style="margin-top:12px"><table><thead><tr><th>Description</th><th class="num">Prix</th><th class="num">Quantité</th><th class="num">Total</th></tr></thead><tbody>' +
     lignes.map(function (l) {
-      return '<tr><td>' + echap(l.desc) + '</td><td class="num">' + echap(l.qte) + '</td><td class="num">' + euros(l.pu) + '</td><td class="num">' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
+      return '<tr><td>' + echap(l.desc) + '</td><td class="num">' + euros(l.pu) + '</td><td class="num">' + echap(l.qte) + '</td><td class="num">' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
     }).join('') +
     '</tbody></table></div>' +
-    '<div class="total-general">Total : ' + euros(f.total) + '</div>' +
+    (f.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(f.details) + '</p>' : '') +
+    (nombre(f.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle : −' + euros(f.remise) + '</p>' : '') +
+    '<div class="total-general">Total : ' + euros(f.total) + ' TTC</div>' +
     '<div class="barre-actions">' +
     '<button class="btn btn-primaire" onclick="imprimerDocument(\'facture\', \'' + f.id + '\')">🖨️ Imprimer / PDF</button>' +
     (etat.role === 'tresorier' && f.statut !== 'payée'
@@ -508,52 +527,92 @@ function imprimerDocument(type, id) {
   var cfg = etat.config;
   var lignes = lignesDe(doc);
   var estFacture = type === 'facture';
-  var delai = nombre(cfg.delaiPaiementJours) || 30;
-  var echeance = new Date(doc.date || aujourdhui());
-  echeance.setDate(echeance.getDate() + delai);
+  var sousTotal = totalLignes(lignes);
+  var remise = nombre(doc.remise);
+  var total = nombre(doc.total) || sousTotal - remise;
 
   var html =
     '<div class="document">' +
+
+    // En-tête : grand titre + badge n° à gauche, logo à droite
     '<div class="doc-entete">' +
-    '<div class="doc-asso">' +
-    (cfg.logoUrl ? '<img class="logo" src="' + echap(cfg.logoUrl) + '" alt="logo"><br>' : '') +
-    '<h1>' + echap(cfg.nomAsso) + '</h1>' +
-    '<p>' + echap(cfg.adresse).replace(/\n/g, '<br>') + '<br>' +
-    echap(cfg.email) + (cfg.telephone ? ' · ' + echap(cfg.telephone) : '') + '</p>' +
+    '<div>' +
+    '<div class="doc-titre">' + (estFacture ? 'FACTURE' : 'DEVIS') + '</div>' +
+    '<span class="doc-badge">' + (estFacture ? 'Facture' : 'Devis') + ' n°' + echap(doc.numero) + '</span>' +
     '</div>' +
-    '<div class="doc-type">' +
-    '<div class="type">' + (estFacture ? 'FACTURE' : 'DEVIS') + '</div>' +
-    '<p><strong>' + echap(doc.numero) + '</strong><br>' +
-    'Date : ' + fmtDate(doc.date) + '<br>' +
-    (estFacture
-      ? (doc.devisNumero ? 'Réf. devis : ' + echap(doc.devisNumero) + '<br>' : '') + 'Échéance : ' + echeance.toLocaleDateString('fr-FR')
-      : 'Validité : 30 jours') +
-    '</p></div></div>' +
-    '<div class="doc-client"><p><strong>' + echap(doc.clientNom) + '</strong><br>' +
-    echap(doc.clientAdresse).replace(/\n/g, '<br>') +
-    (doc.clientEmail ? '<br>' + echap(doc.clientEmail) : '') + '</p></div>' +
-    '<p class="doc-objet"><strong>Objet :</strong> ' + echap(doc.objet) + '</p>' +
-    '<table><thead><tr><th>Description</th><th class="num">Qté</th><th class="num">Prix unitaire</th><th class="num">Montant</th></tr></thead><tbody>' +
+    (cfg.logoUrl ? '<img class="logo" src="' + echap(cfg.logoUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '') +
+    '</div>' +
+
+    // Dates
+    '<div class="doc-dates">' +
+    '<p><strong>Date' + (estFacture ? '' : ' du devis') + '</strong> : ' + fmtDate(doc.date) + '</p>' +
+    (!estFacture && cfg.validiteDevis ? '<p><strong>Validité du devis</strong> : ' + echap(cfg.validiteDevis) + '</p>' : '') +
+    (estFacture && doc.devisNumero ? '<p><strong>Réf. devis</strong> : n°' + echap(doc.devisNumero) + '</p>' : '') +
+    '</div>' +
+
+    // Asso à gauche / client à droite
+    '<div class="doc-blocs">' +
+    '<div class="doc-asso">' +
+    '<p><strong>' + echap(cfg.nomAsso) + '</strong></p>' +
+    (cfg.rna ? '<p>N° RNA : ' + echap(cfg.rna) + '</p>' : '') +
+    (cfg.siren ? '<p>SIREN : ' + echap(cfg.siren) + '</p>' : '') +
+    (cfg.email ? '<p>' + echap(cfg.email) + '</p>' : '') +
+    (cfg.telephone ? '<p>' + echap(cfg.telephone) + '</p>' : '') +
+    '<p>' + echap(cfg.adresse).replace(/\n/g, '</p><p>') + '</p>' +
+    '</div>' +
+    '<div class="doc-client">' +
+    '<p class="doc-attention">À L\'ATTENTION DE</p>' +
+    '<p><strong>' + echap(doc.clientNom) + '</strong></p>' +
+    (doc.clientTel ? '<p>' + echap(doc.clientTel) + '</p>' : '') +
+    (doc.clientEmail ? '<p>' + echap(doc.clientEmail) + '</p>' : '') +
+    (doc.clientAdresse ? '<p style="margin-top:8px">' + echap(doc.clientAdresse).replace(/\n/g, '</p><p>') + '</p>' : '') +
+    '</div></div>' +
+
+    // Tableau des prestations
+    '<table class="doc-table"><thead><tr>' +
+    '<th style="width:46%">DESCRIPTION</th><th>PRIX</th><th>QUANTITÉ</th><th>TOTAL</th>' +
+    '</tr></thead><tbody>' +
     lignes.map(function (l) {
-      return '<tr><td>' + echap(l.desc) + '</td><td class="num">' + echap(l.qte) + '</td>' +
-        '<td class="num">' + euros(l.pu) + '</td><td class="num">' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
+      return '<tr><td><strong>' + echap(l.desc) + '</strong></td>' +
+        '<td>' + euros(l.pu) + '</td>' +
+        '<td>' + String(Math.round(nombre(l.qte)) === nombre(l.qte) && nombre(l.qte) < 10 ? '0' + nombre(l.qte) : l.qte) + '</td>' +
+        '<td>' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
     }).join('') +
     '</tbody></table>' +
-    '<div class="doc-total">Total : ' + euros(doc.total) + '</div>' +
-    '<p style="text-align:right;font-size:12px">' + echap(cfg.mentionTva) + '</p>' +
-    (estFacture && cfg.iban
-      ? '<div class="doc-rib"><strong>Règlement par virement :</strong><br>IBAN : ' + echap(cfg.iban) +
-        (cfg.bic ? ' · BIC : ' + echap(cfg.bic) : '') + '</div>'
+
+    // Encadré détails de la prestation
+    (doc.details
+      ? '<div class="doc-details"><div class="doc-details-titre">DÉTAILS DE LA PRESTATION</div>' +
+        '<div class="doc-details-corps">' + echap(doc.details).replace(/\n/g, '<br>') + '</div></div>'
       : '') +
+
+    // Totaux
+    '<div class="doc-totaux">' +
+    '<p><strong>Sous total :</strong> <span>' + euros(sousTotal) + '</span></p>' +
+    (remise ? '<p><strong>Remise exceptionnelle :</strong> <span>−' + euros(remise) + '</span></p>' : '') +
+    '<p><strong>TVA (0%) :</strong> <span>0 €</span></p>' +
+    '<div class="doc-total-bande"><span>TOTAL :</span> <span>' + euros(total) + ' TTC</span></div>' +
+    '<p class="doc-exoneration">(' + echap(cfg.mentionTva) + ')</p>' +
+    '</div>' +
+
+    // Pied : conditions + signature (devis) / paiement
+    '<div class="doc-pied">' +
+    '<div>' +
+    (!estFacture && doc.conditions
+      ? '<p><strong>Conditions de paiement</strong></p><p>' + echap(doc.conditions).replace(/\n/g, '</p><p>') + '</p>'
+      : '') +
+    '<p style="margin-top:10px"><strong>Paiement à l\'ordre de l\'association</strong></p>' +
+    '<p><strong>' + echap(cfg.nomAsso) + '</strong></p>' +
+    (cfg.iban ? '<p><strong>IBAN :</strong> ' + echap(cfg.iban) + (cfg.bic ? ' · BIC : ' + echap(cfg.bic) : '') + '</p>' : '') +
+    '</div>' +
     (!estFacture
-      ? '<div class="doc-rib">Bon pour accord (date + signature) :<br><br><br></div>'
+      ? '<div class="doc-signature"><p><strong>Signature suivie de la mention<br>« bon pour accord »</strong></p>' +
+        '<div class="doc-ligne-signature"></div></div>'
       : '') +
-    '<div class="doc-mentions">' +
-    echap(cfg.mentionsPied) + '<br>' +
-    (cfg.rna ? 'RNA : ' + echap(cfg.rna) + ' · ' : '') +
-    (cfg.siret ? 'SIRET : ' + echap(cfg.siret) : '') +
-    (estFacture ? '<br>En cas de retard de paiement, indemnité forfaitaire de recouvrement de 40 € (art. L441-10 du Code de commerce).' : '') +
-    '</div></div>';
+    '</div>' +
+
+    '<div class="doc-merci">' + echap(cfg.mentionsPied || 'Merci de votre confiance').toUpperCase() + '</div>' +
+    '</div>';
 
   $('#zone-impression').innerHTML = html;
   window.print();
@@ -887,15 +946,16 @@ function vueParametres() {
     champ('Adresse', '<textarea id="pr-adresse" rows="2">' + echap(c.adresse || '') + '</textarea>') +
     inp('telephone', 'Téléphone') +
     inp('rna', 'N° RNA', 'W...') +
-    inp('siret', 'SIRET (si vous en avez un)') +
-    inp('logoUrl', 'URL du logo (image en ligne)', 'https://...') +
+    inp('siren', 'SIREN') +
+    inp('logoUrl', 'Logo (URL ou chemin, ex : assets/logo.png)', 'assets/logo.png') +
     '</div></div>' +
     '<div class="carte"><h3>Facturation</h3><div class="grille-form">' +
     inp('iban', 'IBAN', 'FR76...') +
     inp('bic', 'BIC') +
-    inp('delaiPaiementJours', 'Délai de paiement (jours)', '30') +
-    champ('Mention TVA', '<input id="pr-mentionTva" value="' + echap(c.mentionTva || '') + '">') +
-    champ('Pied de page des documents', '<input id="pr-mentionsPied" value="' + echap(c.mentionsPied || '') + '">') +
+    inp('validiteDevis', 'Validité des devis', 'ex : 2 mois') +
+    champ('Mention d\'exonération (sous le total)', '<input id="pr-mentionTva" value="' + echap(c.mentionTva || '') + '">') +
+    champ('Conditions de paiement par défaut (devis)', '<textarea id="pr-conditionsPaiement" rows="2">' + echap(c.conditionsPaiement || '') + '</textarea>') +
+    champ('Phrase de pied de page', '<input id="pr-mentionsPied" value="' + echap(c.mentionsPied || '') + '">') +
     '</div></div>' +
     '<div class="carte"><h3>Codes d\'accès</h3><div class="grille-form">' +
     inp('codeTresorier', 'Code trésorier') +
@@ -906,8 +966,8 @@ function vueParametres() {
 
   $('#form-parametres').addEventListener('submit', async function (e) {
     e.preventDefault();
-    var cles = ['nomAsso', 'email', 'adresse', 'telephone', 'rna', 'siret', 'logoUrl',
-      'iban', 'bic', 'delaiPaiementJours', 'mentionTva', 'mentionsPied',
+    var cles = ['nomAsso', 'email', 'adresse', 'telephone', 'rna', 'siren', 'logoUrl',
+      'iban', 'bic', 'validiteDevis', 'mentionTva', 'conditionsPaiement', 'mentionsPied',
       'codeTresorier', 'codeBenevole'];
     var config = {};
     cles.forEach(function (k) { config[k] = $('#pr-' + k).value.trim(); });

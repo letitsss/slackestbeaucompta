@@ -21,25 +21,26 @@ var ONGLETS = {
 };
 
 var COLONNES = {
-  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'total', 'statut', 'factureNumero'],
-  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'total', 'statut', 'devisNumero', 'datePaiement'],
+  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero'],
+  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement'],
   NotesFrais: ['id', 'date', 'benevole', 'description', 'categorie', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
   Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'reference', 'auteur']
 };
 
 var CONFIG_DEFAUT = {
-  nomAsso: "S'Lac'K Est Beau",
-  adresse: 'Annecy, Haute-Savoie',
-  email: 'contact@slackestbeau.org',
+  nomAsso: "S'LAC'K EST BEAU",
+  adresse: '17 Rue Thomas Ruphy\n74000 Annecy',
+  email: 'Slackestbeau@gmail.com',
   telephone: '',
-  siret: '',
-  rna: '',
-  iban: '',
+  siren: '941836520',
+  rna: 'W741011378',
+  iban: 'FR76 1027 8024 2300 0209 1850 394',
   bic: '',
-  mentionTva: 'TVA non applicable, article 293 B du CGI',
-  mentionsPied: 'Association loi 1901 — slackestbeau.org',
-  logoUrl: '',
-  delaiPaiementJours: '30',
+  mentionTva: 'Association exonérée des impôts commerciaux',
+  mentionsPied: 'Merci de votre confiance',
+  logoUrl: 'assets/logo.png',
+  validiteDevis: '2 mois',
+  conditionsPaiement: '40% à la validation du devis\nLe solde tout compte avant la prestation',
   codeTresorier: 'CHANGEMOI-TRESO',
   codeBenevole: 'CHANGEMOI-BENEVOLE',
   dossierJustificatifs: 'Justificatifs SlackEstBeau'
@@ -208,7 +209,7 @@ function getData(role, prenom, config) {
 
 function saveDevis(devis, prenom) {
   if (!devis.id) devis.id = Utilities.getUuid();
-  if (!devis.numero) devis.numero = prochainNumero(ONGLETS.DEVIS, 'DEV');
+  if (!devis.numero) devis.numero = prochainNumero(ONGLETS.DEVIS);
   if (!devis.auteur) devis.auteur = prenom || '';
   upsert(ONGLETS.DEVIS, devis);
   return { ok: true, devis: devis };
@@ -230,14 +231,17 @@ function convertirDevis(id, prenom) {
 
   var facture = {
     id: Utilities.getUuid(),
-    numero: prochainNumero(ONGLETS.FACTURES, 'FAC'),
+    numero: prochainNumero(ONGLETS.FACTURES),
     date: dateISO(new Date()),
     auteur: prenom || devis.auteur,
     clientNom: devis.clientNom,
+    clientTel: devis.clientTel,
     clientAdresse: devis.clientAdresse,
     clientEmail: devis.clientEmail,
     objet: devis.objet,
     lignes: devis.lignes,
+    details: devis.details,
+    remise: devis.remise,
     total: devis.total,
     statut: 'envoyée',
     devisNumero: devis.numero,
@@ -258,7 +262,7 @@ function convertirDevis(id, prenom) {
 
 function saveFacture(facture, prenom) {
   if (!facture.id) facture.id = Utilities.getUuid();
-  if (!facture.numero) facture.numero = prochainNumero(ONGLETS.FACTURES, 'FAC');
+  if (!facture.numero) facture.numero = prochainNumero(ONGLETS.FACTURES);
   if (!facture.auteur) facture.auteur = prenom || '';
   upsert(ONGLETS.FACTURES, facture);
   return { ok: true, facture: facture };
@@ -423,21 +427,21 @@ function supprimerLigne(nomOnglet, id) {
   return { ok: false, erreur: 'Élément introuvable' };
 }
 
-/** Numérotation DEV-2026-001 / FAC-2026-001, remise à zéro chaque année. */
-function prochainNumero(nomOnglet, prefixe) {
-  var annee = new Date().getFullYear();
-  var motif = prefixe + '-' + annee + '-';
+/** Numérotation façon asso : année + n° de séquence (202601, 202602...),
+ *  remise à zéro chaque année. Devis et factures ont chacun leur suite. */
+function prochainNumero(nomOnglet) {
+  var annee = String(new Date().getFullYear());
   var max = 0;
   lireObjets(nomOnglet).forEach(function (obj) {
     var num = String(obj.numero || '');
-    if (num.indexOf(motif) === 0) {
-      var seq = parseInt(num.substring(motif.length), 10);
+    if (num.indexOf(annee) === 0) {
+      var seq = parseInt(num.substring(annee.length), 10);
       if (!isNaN(seq) && seq > max) max = seq;
     }
   });
   var suivant = String(max + 1);
-  while (suivant.length < 3) suivant = '0' + suivant;
-  return motif + suivant;
+  while (suivant.length < 2) suivant = '0' + suivant;
+  return annee + suivant;
 }
 
 function dateISO(d) {
