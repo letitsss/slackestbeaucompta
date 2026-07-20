@@ -76,6 +76,7 @@ var Api = (function () {
 
     saveCompta: function (ligne) { return appeler('saveCompta', { ligne: ligne }); },
     deleteCompta: function (id) { return appeler('deleteCompta', { id: id }); },
+    importCompta: function (lignes) { return appeler('importCompta', { lignes: lignes }); },
 
     saveConfig: function (config) { return appeler('saveConfig', { config: config }); }
   };

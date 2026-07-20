@@ -14,7 +14,8 @@ var etat = {
   vue: 'accueil'
 };
 
-var CATEGORIES_RECETTES = ['Prestations', 'Adhésions', 'Subventions', 'Dons', 'Buvette / événements', 'Autre recette'];
+var CATEGORIES_RECETTES = ['Prestations', 'Adhésions', 'Goodies', 'Subventions', 'Dons', 'Buvette / événements', 'Autre recette'];
+var MODES_PAIEMENT = ['Virement', 'CB', 'Espèces', 'Chèque', 'HelloAsso', 'Prélèvement'];
 var CATEGORIES_DEPENSES = ['Matériel', 'Déplacements', 'Notes de frais', 'Assurance', 'Communication', 'Frais bancaires', 'Location / salle', 'Autre dépense'];
 var CATEGORIES_NOTES = ['Déplacement', 'Repas', 'Matériel', 'Hébergement', 'Autre'];
 
@@ -921,6 +922,31 @@ function fichierVersBase64(fichier) {
    Vue : compta (trésorier)
    --------------------------------------------------------------- */
 
+function listeComptes() {
+  return String(etat.config.comptes || 'Banque,Espèces,HelloAsso')
+    .split(',').map(function (c) { return c.trim(); }).filter(Boolean);
+}
+
+/** Solde par compte sur un jeu d'écritures (recettes/dépenses/virements/reports). */
+function soldesParCompte(lignes) {
+  var soldes = {};
+  listeComptes().forEach(function (c) { soldes[c] = 0; });
+  lignes.forEach(function (l) {
+    var m = nombre(l.montant);
+    var c = l.compte || 'Banque';
+    if (soldes[c] === undefined) soldes[c] = 0;
+    if (l.type === 'recette' || l.type === 'report') soldes[c] += m;
+    else if (l.type === 'dépense') soldes[c] -= m;
+    else if (l.type === 'virement') {
+      var dest = l.compteDest || 'Banque';
+      if (soldes[dest] === undefined) soldes[dest] = 0;
+      soldes[c] -= m;
+      soldes[dest] += m;
+    }
+  });
+  return soldes;
+}
+
 function anneesDisponibles() {
   var annees = {};
   etat.compta.forEach(function (l) {
@@ -931,62 +957,113 @@ function anneesDisponibles() {
   return Object.keys(annees).sort().reverse();
 }
 
-function vueCompta(anneeChoisie) {
+function vueCompta(anneeChoisie, compteChoisi) {
   var annee = anneeChoisie || String(new Date().getFullYear());
-  var lignes = etat.compta
-    .filter(function (l) { return String(l.date || '').slice(0, 4) === annee; })
+  var lignesAnnee = etat.compta
+    .filter(function (l) { return String(l.date || '').slice(0, 4) === annee; });
+  var lignes = lignesAnnee
+    .filter(function (l) { return !compteChoisi || l.compte === compteChoisi || l.compteDest === compteChoisi; })
     .sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
 
-  var recettes = lignes.filter(function (l) { return l.type === 'recette'; })
+  var recettes = lignesAnnee.filter(function (l) { return l.type === 'recette'; })
     .reduce(function (s, l) { return s + nombre(l.montant); }, 0);
-  var depenses = lignes.filter(function (l) { return l.type === 'dépense'; })
+  var depenses = lignesAnnee.filter(function (l) { return l.type === 'dépense'; })
     .reduce(function (s, l) { return s + nombre(l.montant); }, 0);
+  var soldes = soldesParCompte(lignesAnnee);
+
+  function ligneHtml(l) {
+    var montantHtml, typeHtml;
+    if (l.type === 'virement') {
+      typeHtml = '↔ virement';
+      montantHtml = '<span class="texte-doux">' + echap(l.compte || 'Banque') + ' → ' + echap(l.compteDest || 'Banque') + '</span> ' + euros(l.montant);
+    } else if (l.type === 'report') {
+      typeHtml = '📥 report';
+      montantHtml = '<span style="color:#1565c0;font-weight:700">+ ' + euros(l.montant) + '</span>';
+    } else {
+      var recette = l.type === 'recette';
+      typeHtml = echap(l.type);
+      montantHtml = '<span style="color:' + (recette ? 'var(--succes)' : 'var(--danger)') + ';font-weight:700">' +
+        (recette ? '+' : '−') + ' ' + euros(l.montant) + '</span>';
+    }
+    return '<tr>' +
+      '<td>' + fmtDate(l.date) + '</td>' +
+      '<td>' + typeHtml + '</td>' +
+      '<td>' + echap(l.categorie) + '</td>' +
+      '<td>' + echap(l.libelle) + (l.reference ? ' <span class="texte-doux">(' + echap(l.reference) + ')</span>' : '') + '</td>' +
+      '<td>' + echap(l.compte || '') + (l.mode ? ' <span class="texte-doux">· ' + echap(l.mode) + '</span>' : '') + '</td>' +
+      '<td class="num">' + montantHtml + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" title="Pointée sur le relevé bancaire"' +
+      (l.pointee ? ' checked' : '') + ' onchange="basculerPointage(\'' + l.id + '\', \'' + annee + '\', \'' + (compteChoisi || '') + '\')"></td>' +
+      '<td><button class="btn btn-petit btn-danger" onclick="supprimerCompta(\'' + l.id + '\', \'' + annee + '\')">✕</button></td>' +
+      '</tr>';
+  }
 
   $('#vue').innerHTML =
     '<div class="entete-vue"><h2>Compta ' + annee + '</h2>' +
-    '<button class="btn btn-primaire" onclick="editerCompta()">➕ Nouvelle écriture</button></div>' +
+    '<div class="barre-actions" style="margin:0">' +
+    '<button class="btn" onclick="importerHelloAsso()">📥 Import HelloAsso</button>' +
+    '<button class="btn btn-primaire" onclick="editerCompta()">➕ Nouvelle écriture</button></div></div>' +
     '<div class="filtres"><select id="cp-annee">' +
     anneesDisponibles().map(function (a) {
       return '<option' + (a === annee ? ' selected' : '') + '>' + a + '</option>';
     }).join('') + '</select>' +
+    '<select id="cp-compte"><option value="">Tous les comptes</option>' +
+    listeComptes().map(function (c) {
+      return '<option' + (c === compteChoisi ? ' selected' : '') + '>' + echap(c) + '</option>';
+    }).join('') + '</select>' +
     '<button class="btn btn-petit" onclick="exporterComptaCSV(\'' + annee + '\')">⬇️ Export CSV</button></div>' +
     '<div class="cartes-stats">' +
-    '<div class="carte-stat"><div class="valeur">' + euros(recettes) + '</div><div class="libelle">Recettes</div></div>' +
-    '<div class="carte-stat attention"><div class="valeur">' + euros(depenses) + '</div><div class="libelle">Dépenses</div></div>' +
-    '<div class="carte-stat accent"><div class="valeur">' + euros(recettes - depenses) + '</div><div class="libelle">Solde de l\'exercice</div></div>' +
+    Object.keys(soldes).map(function (c) {
+      return '<div class="carte-stat"><div class="valeur">' + euros(soldes[c]) + '</div><div class="libelle">Solde ' + echap(c) + '</div></div>';
+    }).join('') +
+    '<div class="carte-stat accent"><div class="valeur">' + euros(recettes - depenses) + '</div><div class="libelle">Résultat ' + annee + ' (' + euros(recettes) + ' − ' + euros(depenses) + ')</div></div>' +
     '</div>' +
     '<div class="carte">' +
     (!lignes.length ? '<p class="vide">Aucune écriture pour ' + annee + '.</p>' :
       '<div class="conteneur-tableau"><table><thead><tr>' +
-      '<th>Date</th><th>Type</th><th>Catégorie</th><th>Libellé</th><th class="num">Montant</th><th></th>' +
+      '<th>Date</th><th>Type</th><th>Catégorie</th><th>Libellé</th><th>Compte</th><th class="num">Montant</th><th title="Pointée sur le relevé bancaire">✓ banque</th><th></th>' +
       '</tr></thead><tbody>' +
-      lignes.map(function (l) {
-        var signe = l.type === 'recette' ? '+' : '−';
-        var couleur = l.type === 'recette' ? 'var(--succes)' : 'var(--danger)';
-        return '<tr>' +
-          '<td>' + fmtDate(l.date) + '</td>' +
-          '<td>' + echap(l.type) + '</td>' +
-          '<td>' + echap(l.categorie) + '</td>' +
-          '<td>' + echap(l.libelle) + (l.reference ? ' <span class="texte-doux">(' + echap(l.reference) + ')</span>' : '') + '</td>' +
-          '<td class="num" style="color:' + couleur + ';font-weight:700">' + signe + ' ' + euros(l.montant) + '</td>' +
-          '<td><button class="btn btn-petit btn-danger" onclick="supprimerCompta(\'' + l.id + '\', \'' + annee + '\')">✕</button></td>' +
-          '</tr>';
-      }).join('') + '</tbody></table></div>') +
+      lignes.map(ligneHtml).join('') + '</tbody></table></div>') +
+    '<p class="texte-doux" style="margin-top:10px;font-size:12.5px">💡 La colonne « ✓ banque » sert au pointage : coche chaque écriture que tu retrouves sur le relevé de la Caisse d\'Épargne. Le versement mensuel HelloAsso se saisit comme <strong>virement interne HelloAsso → Banque</strong> (il ne compte pas deux fois).</p>' +
     '</div>';
 
-  $('#cp-annee').addEventListener('change', function () { vueCompta(this.value); });
+  $('#cp-annee').addEventListener('change', function () { vueCompta(this.value, compteChoisi); });
+  $('#cp-compte').addEventListener('change', function () { vueCompta(annee, this.value); });
+}
+
+async function basculerPointage(id, annee, compte) {
+  var ligne = etat.compta.find(function (l) { return l.id === id; });
+  if (!ligne) return;
+  ligne.pointee = ligne.pointee ? '' : 'oui';
+  try {
+    await Api.saveCompta(ligne);
+  } catch (e) {
+    ligne.pointee = ligne.pointee ? '' : 'oui';
+    toast(e.message, true);
+  }
+  vueCompta(annee, compte || undefined);
 }
 
 function editerCompta() {
+  var optionsComptes = listeComptes().map(function (c) { return '<option>' + echap(c) + '</option>'; }).join('');
+
   ouvrirModale(
     '<h3>Nouvelle écriture comptable</h3>' +
     '<form id="form-compta">' +
     '<div class="grille-form">' +
     champ('Date *', '<input id="cp-date" type="date" required value="' + aujourdhui() + '">') +
-    champ('Type *', '<select id="cp-type"><option value="recette">Recette</option><option value="dépense">Dépense</option></select>') +
-    champ('Catégorie', '<select id="cp-categorie"></select>') +
+    champ('Type *', '<select id="cp-type">' +
+      '<option value="recette">Recette</option>' +
+      '<option value="dépense">Dépense</option>' +
+      '<option value="virement">Virement interne (ex : HelloAsso → Banque)</option>' +
+      '<option value="report">Report de solde (début d\'exercice)</option></select>') +
+    '<div class="champ" id="cp-champ-categorie"><label>Catégorie</label><select id="cp-categorie"></select></div>' +
     champ('Montant (€) *', '<input id="cp-montant" required inputmode="decimal" placeholder="ex : 150">') +
-    champ('Libellé *', '<input id="cp-libelle" required placeholder="ex : Subvention mairie, achat sangle 25 m...">', true) +
+    '<div class="champ"><label id="cp-label-compte">Compte</label><select id="cp-compte-src">' + optionsComptes + '</select></div>' +
+    '<div class="champ cache" id="cp-champ-dest"><label>Vers le compte</label><select id="cp-compte-dest">' + optionsComptes + '</select></div>' +
+    '<div class="champ" id="cp-champ-mode"><label>Mode de paiement</label><select id="cp-mode">' +
+    MODES_PAIEMENT.map(function (m) { return '<option>' + m + '</option>'; }).join('') + '</select></div>' +
+    champ('Libellé *', '<input id="cp-libelle" required placeholder="ex : Subvention mairie, versement HelloAsso juin...">', true) +
     '</div>' +
     '<div class="barre-actions">' +
     '<button type="submit" class="btn btn-primaire">💾 Enregistrer</button>' +
@@ -994,23 +1071,45 @@ function editerCompta() {
     '</div></form>'
   );
 
-  function majCategories() {
-    var cats = $('#cp-type').value === 'recette' ? CATEGORIES_RECETTES : CATEGORIES_DEPENSES;
+  function majFormulaire() {
+    var type = $('#cp-type').value;
+    var cats = type === 'recette' ? CATEGORIES_RECETTES : CATEGORIES_DEPENSES;
     $('#cp-categorie').innerHTML = cats.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+    $('#cp-champ-categorie').classList.toggle('cache', type === 'virement' || type === 'report');
+    $('#cp-champ-dest').classList.toggle('cache', type !== 'virement');
+    $('#cp-champ-mode').classList.toggle('cache', type === 'virement' || type === 'report');
+    $('#cp-label-compte').textContent = type === 'virement' ? 'Depuis le compte' : 'Compte';
+    if (type === 'virement' && !$('#cp-libelle').value) {
+      $('#cp-libelle').value = 'Versement HelloAsso';
+      $('#cp-compte-src').value = 'HelloAsso';
+      $('#cp-compte-dest').value = 'Banque';
+    }
+    if (type === 'report' && !$('#cp-libelle').value) {
+      $('#cp-libelle').value = 'Report de solde exercice précédent';
+    }
   }
-  majCategories();
-  $('#cp-type').addEventListener('change', majCategories);
+  majFormulaire();
+  $('#cp-type').addEventListener('change', majFormulaire);
 
   $('#form-compta').addEventListener('submit', async function (e) {
     e.preventDefault();
+    var type = $('#cp-type').value;
+    if (type === 'virement' && $('#cp-compte-src').value === $('#cp-compte-dest').value) {
+      toast('Le compte de départ et d\'arrivée doivent être différents', true);
+      return;
+    }
     var ligne = {
       id: '',
       date: $('#cp-date').value,
-      type: $('#cp-type').value,
-      categorie: $('#cp-categorie').value,
+      type: type,
+      categorie: (type === 'virement' || type === 'report') ? '' : $('#cp-categorie').value,
       libelle: $('#cp-libelle').value.trim(),
       montant: nombre($('#cp-montant').value),
+      compte: $('#cp-compte-src').value,
+      compteDest: type === 'virement' ? $('#cp-compte-dest').value : '',
+      mode: (type === 'virement' || type === 'report') ? '' : $('#cp-mode').value,
       reference: '',
+      pointee: '',
       auteur: etat.prenom
     };
     await action(function () { return Api.saveCompta(ligne); }, 'Écriture enregistrée ✔');
@@ -1029,9 +1128,10 @@ async function supprimerCompta(id, annee) {
 
 function exporterComptaCSV(annee) {
   var lignes = etat.compta.filter(function (l) { return String(l.date || '').slice(0, 4) === annee; });
-  var csv = 'Date;Type;Catégorie;Libellé;Montant;Référence;Auteur\n' +
+  var csv = 'Date;Type;Catégorie;Libellé;Montant;Compte;Vers;Mode;Pointée;Référence;Auteur\n' +
     lignes.map(function (l) {
-      return [l.date, l.type, l.categorie, l.libelle, String(nombre(l.montant)).replace('.', ','), l.reference, l.auteur]
+      return [l.date, l.type, l.categorie, l.libelle, String(nombre(l.montant)).replace('.', ','),
+        l.compte, l.compteDest, l.mode, l.pointee ? 'oui' : '', l.reference, l.auteur]
         .map(function (v) { return '"' + String(v || '').replace(/"/g, '""') + '"'; }).join(';');
     }).join('\n');
   var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
@@ -1040,6 +1140,185 @@ function exporterComptaCSV(annee) {
   a.download = 'compta-slackestbeau-' + annee + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/* ---------------------------------------------------------------
+   Import HelloAsso (export CSV des paiements)
+   --------------------------------------------------------------- */
+
+/** Parseur CSV minimal : gère les guillemets et détecte ; ou , */
+function parserCSV(texte) {
+  texte = texte.replace(/^﻿/, '');
+  var premiereLigne = texte.split(/\r?\n/)[0] || '';
+  var sep = (premiereLigne.split(';').length >= premiereLigne.split(',').length) ? ';' : ',';
+
+  var lignes = [], champ = '', ligne = [], entreGuillemets = false;
+  for (var i = 0; i < texte.length; i++) {
+    var c = texte[i];
+    if (entreGuillemets) {
+      if (c === '"' && texte[i + 1] === '"') { champ += '"'; i++; }
+      else if (c === '"') entreGuillemets = false;
+      else champ += c;
+    } else if (c === '"') {
+      entreGuillemets = true;
+    } else if (c === sep) {
+      ligne.push(champ); champ = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && texte[i + 1] === '\n') i++;
+      ligne.push(champ); champ = '';
+      if (ligne.some(function (v) { return v.trim(); })) lignes.push(ligne);
+      ligne = [];
+    } else {
+      champ += c;
+    }
+  }
+  if (champ || ligne.length) { ligne.push(champ); if (ligne.some(function (v) { return v.trim(); })) lignes.push(ligne); }
+  return lignes;
+}
+
+function normaliserEntete(s) {
+  return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+/** Transforme un export HelloAsso en écritures compta prêtes à importer. */
+function analyserHelloAsso(texte) {
+  var tableau = parserCSV(texte);
+  if (tableau.length < 2) throw new Error('Fichier vide ou illisible');
+
+  var entetes = tableau[0].map(normaliserEntete);
+  function col() {
+    for (var i = 0; i < arguments.length; i++) {
+      var idx = -1;
+      for (var j = 0; j < entetes.length; j++) {
+        if (entetes[j].indexOf(arguments[i]) !== -1) { idx = j; break; }
+      }
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  }
+
+  var iRef = col('reference', 'numero');
+  var iDate = col('date');
+  var iMontant = col('montant');
+  var iType = col('type');
+  var iNom = col('nom acheteur', 'nom payeur', 'nom');
+  var iPrenom = col('prenom');
+  var iStatut = col('statut');
+  var iFormule = col('formule', 'tarif', 'campagne');
+
+  if (iDate === -1 || iMontant === -1) {
+    throw new Error('Colonnes Date/Montant introuvables — est-ce bien un export HelloAsso au format CSV ?');
+  }
+
+  var ecritures = [];
+  for (var n = 1; n < tableau.length; n++) {
+    var l = tableau[n];
+    var statut = iStatut !== -1 ? String(l[iStatut]) : '';
+    if (statut && /rembours|annul|refus|erreur/i.test(statut)) continue;
+
+    var montant = nombre(l[iMontant]);
+    if (!montant) continue;
+
+    // Date : "12/03/2026 10:23" ou ISO → ISO
+    var brut = String(l[iDate] || '').trim();
+    var date = brut.slice(0, 10);
+    var m = brut.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) date = m[3] + '-' + m[2] + '-' + m[1];
+
+    var typeHa = iType !== -1 ? String(l[iType]) : '';
+    var categorie = 'Autre recette';
+    if (/adh/i.test(typeHa)) categorie = 'Adhésions';
+    else if (/boutique|vente|commande/i.test(typeHa)) categorie = 'Goodies';
+    else if (/don|crowd|collecte/i.test(typeHa)) categorie = 'Dons';
+    else if (/even|billet/i.test(typeHa)) categorie = 'Buvette / événements';
+
+    var qui = ((iPrenom !== -1 ? l[iPrenom] + ' ' : '') + (iNom !== -1 ? l[iNom] : '')).trim();
+    var formule = iFormule !== -1 ? String(l[iFormule]).trim() : '';
+    var reference = iRef !== -1 && l[iRef] ? 'HA-' + String(l[iRef]).trim()
+      : 'HA-' + date + '-' + montant + '-' + (qui || n);
+
+    ecritures.push({
+      date: date,
+      type: 'recette',
+      categorie: categorie,
+      libelle: categorie + (qui ? ' — ' + qui : '') + (formule && formule !== qui ? ' (' + formule + ')' : ''),
+      montant: montant,
+      compte: 'HelloAsso',
+      mode: 'HelloAsso',
+      compteDest: '',
+      reference: reference,
+      pointee: ''
+    });
+  }
+  return ecritures;
+}
+
+var importHelloAssoEnAttente = [];
+
+function importerHelloAsso() {
+  ouvrirModale(
+    '<h3>📥 Importer les paiements HelloAsso</h3>' +
+    '<p class="texte-doux">Dans votre espace admin HelloAsso : <strong>Comptabilité → Paiements → Exporter</strong> (format CSV), puis choisis le fichier ci-dessous. Chaque paiement devient une recette sur le compte HelloAsso. Réimporter le même fichier ne crée <strong>aucun doublon</strong>.</p>' +
+    '<p style="margin:14px 0"><input type="file" id="ha-fichier" accept=".csv,text/csv"></p>' +
+    '<div id="ha-apercu"></div>' +
+    '<div class="barre-actions">' +
+    '<button class="btn btn-primaire cache" id="ha-importer">Importer</button>' +
+    '<button class="btn" onclick="fermerModale()">Fermer</button></div>'
+  );
+
+  $('#ha-fichier').addEventListener('change', function () {
+    var fichier = this.files[0];
+    if (!fichier) return;
+    var lecteur = new FileReader();
+    lecteur.onload = function () {
+      try {
+        var ecritures = analyserHelloAsso(lecteur.result);
+        var refsExistantes = {};
+        etat.compta.forEach(function (l) { if (l.reference) refsExistantes[String(l.reference)] = true; });
+        var nouvelles = ecritures.filter(function (e) { return !refsExistantes[e.reference]; });
+        var doublons = ecritures.length - nouvelles.length;
+        importHelloAssoEnAttente = nouvelles;
+
+        var parCategorie = {};
+        nouvelles.forEach(function (e) {
+          parCategorie[e.categorie] = parCategorie[e.categorie] || { n: 0, total: 0 };
+          parCategorie[e.categorie].n++;
+          parCategorie[e.categorie].total += e.montant;
+        });
+        var total = nouvelles.reduce(function (s, e) { return s + e.montant; }, 0);
+
+        $('#ha-apercu').innerHTML =
+          '<div class="carte" style="margin:0 0 10px">' +
+          '<p><strong>' + ecritures.length + '</strong> paiement(s) dans le fichier · ' +
+          '<strong>' + nouvelles.length + '</strong> nouveau(x) · ' +
+          '<strong>' + doublons + '</strong> déjà importé(s), ignoré(s)</p>' +
+          (nouvelles.length ?
+            '<table style="margin-top:8px"><tbody>' +
+            Object.keys(parCategorie).map(function (c) {
+              return '<tr><td>' + echap(c) + '</td><td class="num">' + parCategorie[c].n + ' paiement(s)</td><td class="num">' + euros(parCategorie[c].total) + '</td></tr>';
+            }).join('') +
+            '<tr><td><strong>Total à importer</strong></td><td></td><td class="num"><strong>' + euros(total) + '</strong></td></tr>' +
+            '</tbody></table>' : '<p class="texte-doux">Rien de nouveau à importer. ✔</p>') +
+          '</div>';
+        $('#ha-importer').classList.toggle('cache', !nouvelles.length);
+        $('#ha-importer').textContent = 'Importer ' + nouvelles.length + ' paiement(s)';
+      } catch (err) {
+        $('#ha-apercu').innerHTML = '<p class="erreur">' + echap(err.message) + '</p>';
+        $('#ha-importer').classList.add('cache');
+      }
+    };
+    lecteur.readAsText(fichier, 'utf-8');
+  });
+
+  $('#ha-importer').addEventListener('click', async function () {
+    if (!importHelloAssoEnAttente.length) return;
+    var res = await action(function () { return Api.importCompta(importHelloAssoEnAttente); });
+    toast(res.ajoutees + ' paiement(s) importé(s), ' + res.doublons + ' doublon(s) ignoré(s) ✔');
+    importHelloAssoEnAttente = [];
+    fermerModale();
+    await rechargerDonnees();
+    naviguer('compta');
+  });
 }
 
 /* ---------------------------------------------------------------
@@ -1063,6 +1342,18 @@ function vueBilan(anneeChoisie) {
   var depenses = totauxParCategorie('dépense');
   var totalR = recettes.reduce(function (s, r) { return s + r.total; }, 0);
   var totalD = depenses.reduce(function (s, r) { return s + r.total; }, 0);
+  var report = lignes.filter(function (l) { return l.type === 'report'; })
+    .reduce(function (s, l) { return s + nombre(l.montant); }, 0);
+
+  // Synthèse mois par mois (virements internes et reports exclus)
+  var MOIS = ['Janv.', 'Févr.', 'Mars', 'Avril', 'Mai', 'Juin', 'Juil.', 'Août', 'Sept.', 'Oct.', 'Nov.', 'Déc.'];
+  var parMois = MOIS.map(function () { return { r: 0, d: 0 }; });
+  lignes.forEach(function (l) {
+    var m = parseInt(String(l.date || '').slice(5, 7), 10) - 1;
+    if (isNaN(m) || m < 0 || m > 11) return;
+    if (l.type === 'recette') parMois[m].r += nombre(l.montant);
+    else if (l.type === 'dépense') parMois[m].d += nombre(l.montant);
+  });
 
   function tableBilan(titre, items, total) {
     return '<div class="carte"><h3>' + titre + '</h3>' +
@@ -1085,11 +1376,20 @@ function vueBilan(anneeChoisie) {
     '<div class="cartes-stats">' +
     '<div class="carte-stat"><div class="valeur">' + euros(totalR) + '</div><div class="libelle">Total recettes</div></div>' +
     '<div class="carte-stat attention"><div class="valeur">' + euros(totalD) + '</div><div class="libelle">Total dépenses</div></div>' +
-    '<div class="carte-stat accent"><div class="valeur">' + euros(totalR - totalD) + '</div><div class="libelle">Résultat de l\'exercice</div></div>' +
+    '<div class="carte-stat"><div class="valeur">' + euros(report) + '</div><div class="libelle">Report exercice précédent</div></div>' +
+    '<div class="carte-stat accent"><div class="valeur">' + euros(report + totalR - totalD) + '</div><div class="libelle">Solde de l\'asso fin ' + annee + ' (report + résultat ' + euros(totalR - totalD) + ')</div></div>' +
     '</div>' +
     tableBilan('📈 Recettes par catégorie', recettes, totalR) +
     tableBilan('📉 Dépenses par catégorie', depenses, totalD) +
-    '<p class="texte-doux">Astuce : utilise l\'export CSV de l\'onglet Compta pour joindre le détail au rapport d\'AG.</p>';
+    '<div class="carte"><h3>📅 Synthèse mois par mois</h3>' +
+    '<div class="conteneur-tableau"><table><thead><tr><th>Mois</th><th class="num">Recettes</th><th class="num">Dépenses</th><th class="num">Résultat</th></tr></thead><tbody>' +
+    parMois.map(function (m, i) {
+      if (!m.r && !m.d) return '';
+      return '<tr><td>' + MOIS[i] + '</td><td class="num">' + euros(m.r) + '</td><td class="num">' + euros(m.d) + '</td>' +
+        '<td class="num" style="font-weight:700;color:' + (m.r - m.d >= 0 ? 'var(--succes)' : 'var(--danger)') + '">' + euros(m.r - m.d) + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div></div>' +
+    '<p class="texte-doux">💡 En début d\'année, saisis une écriture « Report de solde » par compte (onglet Compta) avec le solde au 31 décembre — le bilan affichera alors le vrai solde de l\'asso. Utilise l\'export CSV de l\'onglet Compta pour joindre le détail au rapport d\'AG.</p>';
 
   $('#bl-annee').addEventListener('change', function () { vueBilan(this.value); });
 }

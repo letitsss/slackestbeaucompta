@@ -25,7 +25,7 @@ var COLONNES = {
   Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero'],
   Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement'],
   NotesFrais: ['id', 'date', 'benevole', 'saisiePar', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
-  Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'reference', 'auteur'],
+  Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'compte', 'compteDest', 'mode', 'reference', 'pointee', 'auteur'],
   Benevoles: ['nom']
 };
 
@@ -43,6 +43,7 @@ var CONFIG_DEFAUT = {
   logoUrl: 'assets/logo.png',
   validiteDevis: '2 mois',
   tauxKm: '0.35',
+  comptes: 'Banque,Espèces,HelloAsso',
   conditionsPaiement: '40% à la validation du devis\nLe solde tout compte avant la prestation',
   codeTresorier: 'CHANGEMOI-TRESO',
   codeBenevole: 'CHANGEMOI-BENEVOLE',
@@ -134,7 +135,7 @@ function traiter(req) {
 
   if (!role) return { ok: false, erreur: 'Non autorisé' };
 
-  var actionsTresorier = ['saveCompta', 'deleteCompta', 'traiterNote', 'marquerPayee', 'saveConfig', 'deleteFacture'];
+  var actionsTresorier = ['saveCompta', 'deleteCompta', 'importCompta', 'traiterNote', 'marquerPayee', 'saveConfig', 'deleteFacture'];
   if (actionsTresorier.indexOf(req.action) !== -1 && role !== 'tresorier') {
     return { ok: false, erreur: 'Réservé au trésorier' };
   }
@@ -151,6 +152,7 @@ function traiter(req) {
     case 'traiterNote':   return traiterNote(req.id, req.statut, req.commentaire);
     case 'saveCompta':    return saveCompta(req.ligne, req.prenom);
     case 'deleteCompta':  return supprimerLigne(ONGLETS.COMPTA, req.id);
+    case 'importCompta':  return importCompta(req.lignes, req.prenom);
     case 'saveConfig':    return saveConfig(req.config);
     default:              return { ok: false, erreur: 'Action inconnue : ' + req.action };
   }
@@ -331,6 +333,8 @@ function marquerPayee(id, datePaiement) {
     categorie: 'Prestations',
     libelle: 'Facture ' + facture.numero + ' — ' + facture.clientNom,
     montant: facture.total,
+    compte: 'Banque',
+    mode: 'Virement',
     reference: facture.numero,
     auteur: 'auto'
   });
@@ -387,6 +391,8 @@ function traiterNote(id, statut, commentaire) {
       categorie: 'Notes de frais',
       libelle: 'Note de frais ' + note.benevole + ' — ' + note.description,
       montant: note.montant,
+      compte: 'Banque',
+      mode: 'Virement',
       reference: note.id,
       auteur: 'auto'
     });
@@ -403,6 +409,37 @@ function saveCompta(ligne, prenom) {
   if (!ligne.auteur) ligne.auteur = prenom || '';
   upsert(ONGLETS.COMPTA, ligne);
   return { ok: true, ligne: ligne };
+}
+
+/** Import en masse (export HelloAsso) avec anti-doublons sur la référence. */
+function importCompta(lignes, prenom) {
+  if (!lignes || !lignes.length) return { ok: false, erreur: 'Aucune ligne à importer' };
+
+  var existantes = {};
+  lireObjets(ONGLETS.COMPTA).forEach(function (l) {
+    if (l.reference) existantes[String(l.reference)] = true;
+  });
+
+  var sh = feuille(ONGLETS.COMPTA);
+  var entetes = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var nouvelles = [];
+  var doublons = 0;
+
+  lignes.forEach(function (l) {
+    if (l.reference && existantes[String(l.reference)]) { doublons++; return; }
+    l.id = Utilities.getUuid();
+    if (!l.auteur) l.auteur = prenom || 'import';
+    if (l.reference) existantes[String(l.reference)] = true;
+    nouvelles.push(entetes.map(function (col) {
+      var v = l[col];
+      return v === undefined || v === null ? '' : v;
+    }));
+  });
+
+  if (nouvelles.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, nouvelles.length, entetes.length).setValues(nouvelles);
+  }
+  return { ok: true, ajoutees: nouvelles.length, doublons: doublons };
 }
 
 /* ------------------------------------------------------------------ */
