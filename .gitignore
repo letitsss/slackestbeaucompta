@@ -1,0 +1,5 @@
+# Relevés bancaires et exports déposés dans le dossier pour analyse —
+# ne doivent JAMAIS être publiés sur GitHub
+*.csv
+*.xlsx
+*.ofx

@@ -1002,6 +1002,7 @@ function vueCompta(anneeChoisie, compteChoisi) {
     '<div class="entete-vue"><h2>Compta ' + annee + '</h2>' +
     '<div class="barre-actions" style="margin:0">' +
     '<button class="btn" onclick="importerHelloAsso()">📥 Import HelloAsso</button>' +
+    '<button class="btn" onclick="importerReleveBanque()">🏦 Relevé banque</button>' +
     '<button class="btn btn-primaire" onclick="editerCompta()">➕ Nouvelle écriture</button></div></div>' +
     '<div class="filtres"><select id="cp-annee">' +
     anneesDisponibles().map(function (a) {
@@ -1318,6 +1319,275 @@ function importerHelloAsso() {
     fermerModale();
     await rechargerDonnees();
     naviguer('compta');
+  });
+}
+
+/* ---------------------------------------------------------------
+   Import relevé bancaire Caisse d'Épargne : rapprochement auto
+   --------------------------------------------------------------- */
+
+function hashCourt(s) {
+  var h = 5381;
+  for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+/** Lit le fichier en essayant UTF-8 puis Windows-1252 (encodage Caisse d'Épargne). */
+function lireFichierTexte(fichier) {
+  return new Promise(function (resoudre, rejeter) {
+    var lecteur = new FileReader();
+    lecteur.onerror = rejeter;
+    lecteur.onload = function () {
+      try {
+        resoudre(new TextDecoder('utf-8', { fatal: true }).decode(lecteur.result));
+      } catch (e) {
+        resoudre(new TextDecoder('windows-1252').decode(lecteur.result));
+      }
+    };
+    lecteur.readAsArrayBuffer(fichier);
+  });
+}
+
+/** Transforme un relevé Caisse d'Épargne en liste d'opérations. */
+function analyserReleveBanque(texte) {
+  var tableau = parserCSV(texte);
+
+  // Cherche la ligne d'en-tête (les relevés ont parfois des lignes d'info avant)
+  var iEntete = -1, entetes = [];
+  for (var i = 0; i < Math.min(tableau.length, 10); i++) {
+    var norm = tableau[i].map(normaliserEntete);
+    if (norm.some(function (c) { return c.indexOf('date') === 0; }) &&
+        norm.some(function (c) { return /^d.{0,2}bit|^cr.{0,2}dit|^montant/.test(c); })) {
+      iEntete = i; entetes = norm; break;
+    }
+  }
+  if (iEntete === -1) throw new Error('Format non reconnu — est-ce bien l\'export CSV des opérations de la banque ?');
+
+  function col(regex) {
+    for (var j = 0; j < entetes.length; j++) if (regex.test(entetes[j])) return j;
+    return -1;
+  }
+  var iDate = col(/^date$/) !== -1 ? col(/^date$/) : col(/^date/);
+  var iDebit = col(/^d.{0,2}bit/);
+  var iCredit = col(/^cr.{0,2}dit/);
+  var iMontant = col(/^montant/);
+  var iLibelle = col(/^libell/);
+  if (iLibelle === -1) throw new Error('Colonne Libellé introuvable dans le fichier');
+
+  var ops = [];
+  for (var n = iEntete + 1; n < tableau.length; n++) {
+    var l = tableau[n];
+    var brut = String(l[iDate] || '').trim();
+    var m = brut.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    var date = m ? m[3] + '-' + m[2] + '-' + m[1] : brut.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+
+    var montant, sens;
+    if (iDebit !== -1 || iCredit !== -1) {
+      var credit = iCredit !== -1 ? nombre(l[iCredit]) : 0;
+      var debit = iDebit !== -1 ? nombre(l[iDebit]) : 0;
+      if (credit) { montant = Math.abs(credit); sens = 'credit'; }
+      else if (debit) { montant = Math.abs(debit); sens = 'debit'; }
+      else continue;
+    } else {
+      var v = nombre(l[iMontant]);
+      if (!v) continue;
+      montant = Math.abs(v); sens = v > 0 ? 'credit' : 'debit';
+    }
+
+    var libelle = String(l[iLibelle] || '').replace(/\s+/g, ' ').trim();
+    ops.push({
+      date: date, montant: Math.round(montant * 100) / 100, sens: sens, libelle: libelle,
+      reference: 'CE-' + date + '-' + (sens === 'credit' ? '+' : '-') + montant + '-' + hashCourt(libelle)
+    });
+  }
+  if (!ops.length) throw new Error('Aucune opération trouvée dans le fichier');
+  return ops;
+}
+
+/** Devine l'écriture à créer pour une opération non rapprochée. */
+function devinerEcriture(op) {
+  var lib = op.libelle.toUpperCase();
+  var e = {
+    date: op.date, libelle: op.libelle, montant: op.montant,
+    compte: 'Banque', compteDest: '', reference: op.reference, pointee: 'oui'
+  };
+  if (/HELLOASSO/.test(lib) && op.sens === 'credit') {
+    e.type = 'virement'; e.compte = 'HelloAsso'; e.compteDest = 'Banque';
+    e.categorie = ''; e.mode = ''; e.libelle = 'Versement HelloAsso — ' + op.date.slice(0, 7);
+    return e;
+  }
+  if (op.sens === 'credit') {
+    e.type = 'recette'; e.mode = 'Virement';
+    e.categorie = /FACTURE/.test(lib) ? 'Prestations'
+      : /SUBVENTION|MAIRIE|CAF|ANS|FDVA/.test(lib) ? 'Subventions'
+      : /SOUTIEN ASSO|RISTOURNE|INTERETS/.test(lib) ? 'Autre recette'
+      : 'Autre recette';
+    return e;
+  }
+  e.type = 'dépense';
+  if (/MAIF|MACIF|AXA|MAAF|ASSUR/.test(lib)) { e.categorie = 'Assurance'; e.mode = 'Prélèvement'; }
+  else if (/FACT SGT|FRAIS|COTISATION BANC|COMMISSION/.test(lib)) { e.categorie = 'Frais bancaires'; e.mode = 'Prélèvement'; }
+  else if (/PAIEMENT CB|CARTE/.test(lib)) { e.categorie = 'Autre dépense'; e.mode = 'CB'; }
+  else if (/^PRLV/.test(lib)) { e.categorie = 'Autre dépense'; e.mode = 'Prélèvement'; }
+  else { e.categorie = 'Autre dépense'; e.mode = 'Virement'; }
+  return e;
+}
+
+/** Rapproche les opérations du relevé avec les écritures existantes. */
+function rapprocherOperations(ops) {
+  var refsExistantes = {};
+  etat.compta.forEach(function (l) { if (l.reference) refsExistantes[String(l.reference)] = true; });
+
+  // Écritures qui touchent le compte Banque
+  var pool = etat.compta.filter(function (l) {
+    if (l.type === 'virement') return l.compteDest === 'Banque' || (l.compte || 'Banque') === 'Banque';
+    return (l.compte || 'Banque') === 'Banque';
+  }).slice();
+
+  function sensLigne(l) {
+    if (l.type === 'virement') return l.compteDest === 'Banque' ? 'credit' : 'debit';
+    return (l.type === 'recette' || l.type === 'report') ? 'credit' : 'debit';
+  }
+
+  var resultat = { aPointer: [], dejaTraitees: [], aCreer: [] };
+  ops.forEach(function (op) {
+    if (refsExistantes[op.reference]) { resultat.dejaTraitees.push(op); return; }
+    var indice = -1;
+    for (var i = 0; i < pool.length; i++) {
+      var l = pool[i];
+      if (Math.abs(nombre(l.montant) - op.montant) > 0.005) continue;
+      if (sensLigne(l) !== op.sens) continue;
+      if (Math.abs(new Date(l.date) - new Date(op.date)) > 15 * 86400000) continue;
+      indice = i;
+      if (!l.pointee) break; // préfère une écriture pas encore pointée
+    }
+    if (indice !== -1) {
+      var ligne = pool.splice(indice, 1)[0];
+      if (ligne.pointee) resultat.dejaTraitees.push(op);
+      else resultat.aPointer.push({ op: op, ligne: ligne });
+    } else {
+      resultat.aCreer.push(op);
+    }
+  });
+  return resultat;
+}
+
+var releveEnAttente = null;
+
+function importerReleveBanque() {
+  ouvrirModale(
+    '<h3>🏦 Rapprochement bancaire (Caisse d\'Épargne)</h3>' +
+    '<p class="texte-doux">Télécharge l\'export CSV des opérations depuis l\'espace en ligne de la banque, puis choisis le fichier. L\'appli pointe automatiquement les écritures retrouvées sur le relevé et te propose de créer celles qui manquent.</p>' +
+    '<p style="margin:14px 0"><input type="file" id="rb-fichier" accept=".csv,text/csv"></p>' +
+    '<div id="rb-apercu"></div>' +
+    '<div class="barre-actions">' +
+    '<button class="btn btn-primaire cache" id="rb-appliquer">Appliquer</button>' +
+    '<button class="btn" onclick="fermerModale()">Fermer</button></div>'
+  );
+
+  $('#rb-fichier').addEventListener('change', async function () {
+    var fichier = this.files[0];
+    if (!fichier) return;
+    try {
+      var ops = analyserReleveBanque(await lireFichierTexte(fichier));
+      var r = rapprocherOperations(ops);
+      releveEnAttente = r;
+
+      var html =
+        '<div class="carte" style="margin:0 0 10px">' +
+        '<p><strong>' + ops.length + '</strong> opération(s) sur le relevé : ' +
+        '<strong>' + r.aPointer.length + '</strong> à pointer automatiquement · ' +
+        '<strong>' + r.dejaTraitees.length + '</strong> déjà en ordre · ' +
+        '<strong>' + r.aCreer.length + '</strong> absente(s) du livre</p></div>';
+
+      if (r.aPointer.length) {
+        html += '<div class="carte" style="margin:0 0 10px"><h3>✓ Seront pointées</h3><div class="conteneur-tableau"><table><tbody>' +
+          r.aPointer.map(function (p) {
+            return '<tr><td>' + fmtDate(p.ligne.date) + '</td><td>' + echap(p.ligne.libelle) + '</td>' +
+              '<td class="num">' + euros(p.ligne.montant) + '</td></tr>';
+          }).join('') + '</tbody></table></div></div>';
+      }
+
+      if (r.aCreer.length) {
+        html += '<div class="carte" style="margin:0 0 10px"><h3>➕ À créer dans le livre</h3>' +
+          '<p class="texte-doux" style="font-size:12.5px">Vérifie la catégorie proposée, décoche ce que tu ne veux pas créer.</p>' +
+          '<div class="conteneur-tableau"><table><tbody>' +
+          r.aCreer.map(function (op, i) {
+            var e = devinerEcriture(op);
+            var options;
+            if (e.type === 'virement') {
+              options = '<option value="__virement__" selected>Virement HelloAsso → Banque</option>' +
+                CATEGORIES_RECETTES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+            } else if (op.sens === 'credit') {
+              options = CATEGORIES_RECETTES.map(function (c) {
+                return '<option' + (c === e.categorie ? ' selected' : '') + '>' + c + '</option>';
+              }).join('');
+            } else {
+              options = CATEGORIES_DEPENSES.map(function (c) {
+                return '<option' + (c === e.categorie ? ' selected' : '') + '>' + c + '</option>';
+              }).join('');
+            }
+            return '<tr>' +
+              '<td><input type="checkbox" class="rb-coche" data-i="' + i + '" checked></td>' +
+              '<td>' + fmtDate(op.date) + '</td>' +
+              '<td style="max-width:280px">' + echap(op.libelle.slice(0, 90)) + '</td>' +
+              '<td class="num" style="font-weight:700;color:' + (op.sens === 'credit' ? 'var(--succes)' : 'var(--danger)') + '">' +
+              (op.sens === 'credit' ? '+' : '−') + ' ' + euros(op.montant) + '</td>' +
+              '<td><select class="rb-categorie" data-i="' + i + '" style="min-width:150px">' + options + '</select></td>' +
+              '</tr>';
+          }).join('') + '</tbody></table></div></div>';
+      }
+
+      $('#rb-apercu').innerHTML = html;
+      var rien = !r.aPointer.length && !r.aCreer.length;
+      $('#rb-appliquer').classList.toggle('cache', rien);
+      if (rien) $('#rb-apercu').innerHTML += '<p class="texte-doux">Tout est déjà à jour. ✔</p>';
+    } catch (err) {
+      $('#rb-apercu').innerHTML = '<p class="erreur">' + echap(err.message) + '</p>';
+      $('#rb-appliquer').classList.add('cache');
+    }
+  });
+
+  $('#rb-appliquer').addEventListener('click', async function () {
+    var r = releveEnAttente;
+    if (!r) return;
+    this.disabled = true;
+    chargement(true);
+    try {
+      for (var i = 0; i < r.aPointer.length; i++) {
+        r.aPointer[i].ligne.pointee = 'oui';
+        await Api.saveCompta(r.aPointer[i].ligne);
+      }
+      var aImporter = [];
+      document.querySelectorAll('.rb-coche').forEach(function (coche) {
+        if (!coche.checked) return;
+        var idx = parseInt(coche.dataset.i, 10);
+        var e = devinerEcriture(r.aCreer[idx]);
+        var choix = document.querySelector('.rb-categorie[data-i="' + idx + '"]').value;
+        if (choix === '__virement__') {
+          e.type = 'virement'; e.compte = 'HelloAsso'; e.compteDest = 'Banque'; e.categorie = ''; e.mode = '';
+        } else {
+          if (e.type === 'virement') { // l'utilisateur a préféré une recette
+            e.type = 'recette'; e.compte = 'Banque'; e.compteDest = ''; e.mode = 'Virement';
+            e.libelle = r.aCreer[idx].libelle;
+          }
+          e.categorie = choix;
+        }
+        aImporter.push(e);
+      });
+      if (aImporter.length) await Api.importCompta(aImporter);
+      toast(r.aPointer.length + ' écriture(s) pointée(s), ' + aImporter.length + ' créée(s) ✔');
+      releveEnAttente = null;
+      fermerModale();
+      await rechargerDonnees();
+      naviguer('compta');
+    } catch (err) {
+      toast(err.message, true);
+      this.disabled = false;
+    } finally {
+      chargement(false);
+    }
   });
 }
 
