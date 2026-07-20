@@ -521,6 +521,54 @@ async function supprimerFacture(id) {
    Impression devis / facture
    --------------------------------------------------------------- */
 
+/** Résout un chemin relatif (ex : assets/logo.png) en URL absolue,
+ *  nécessaire car le document s'ouvre dans son propre onglet. */
+function resoudreUrl(u) {
+  try { return new URL(u, window.location.href).href; } catch (e) { return u; }
+}
+
+var STYLE_DOCUMENT = [
+  '* { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }',
+  'body { font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:#1c2733; font-size:13px;',
+  '  max-width:190mm; margin:0 auto; padding:10mm 6mm; background:#fff; }',
+  '@page { size:A4; margin:10mm 12mm; }',
+  'p { line-height:1.5; }',
+  '.doc-entete { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:12px; }',
+  '.doc-titre { font-size:46px; font-weight:800; color:#85aec9; line-height:1; margin-bottom:8px; }',
+  '.doc-badge { display:inline-block; border:1.5px solid #5c82a3; color:#3f5a70; border-radius:999px;',
+  '  padding:4px 14px; font-size:13px; font-weight:600; }',
+  '.logo { max-height:90px; max-width:150px; object-fit:contain; }',
+  '.doc-dates { border-top:1.5px solid #3d4a55; border-bottom:1.5px solid #3d4a55;',
+  '  padding:8px 2px; margin-bottom:16px; font-size:12.5px; }',
+  '.doc-blocs { display:flex; justify-content:space-between; gap:24px; margin-bottom:20px; font-size:12.5px; }',
+  '.doc-client { text-align:right; }',
+  '.doc-attention { font-weight:800; letter-spacing:0.03em; margin-bottom:2px; }',
+  'table { width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:18px; table-layout:fixed; }',
+  'th { background:#5c82a3; color:#fff; text-align:center; padding:9px 10px; font-size:12px;',
+  '  letter-spacing:0.05em; border:1px solid #5c82a3; }',
+  'th:first-child { width:46%; }',
+  'td { border:1px solid #9fb2c0; text-align:center; padding:12px 10px; vertical-align:middle; word-wrap:break-word; }',
+  '.doc-details { border:1px solid #9fb2c0; margin-bottom:18px; }',
+  '.doc-details-titre { background:#5c82a3; color:#fff; text-align:center; padding:7px 10px;',
+  '  font-size:12px; font-weight:700; letter-spacing:0.05em; }',
+  '.doc-details-corps { padding:12px 16px; text-align:center; font-size:12.5px; font-weight:600; }',
+  '.doc-totaux { margin-left:auto; width:62%; text-align:right; font-size:13.5px; }',
+  '.doc-totaux p { padding:3px 6px; }',
+  '.doc-totaux p span { display:inline-block; min-width:90px; }',
+  '.doc-total-bande { background:#48657e; color:#fff; display:flex; justify-content:flex-end; gap:26px;',
+  '  padding:9px 14px; font-size:15px; font-weight:800; margin-top:6px; }',
+  '.doc-exoneration { font-style:italic; font-size:11px; margin-top:4px; }',
+  '.doc-pied { display:flex; justify-content:space-between; align-items:flex-start; gap:30px; margin-top:26px; font-size:12px; }',
+  '.doc-signature { text-align:center; min-width:220px; }',
+  '.doc-ligne-signature { border-bottom:1.5px solid #3d4a55; margin-top:52px; }',
+  '.doc-merci { text-align:center; border-top:1.5px solid #3d4a55; margin-top:26px; padding-top:10px;',
+  '  font-size:12.5px; font-weight:700; letter-spacing:0.08em; }',
+  '.barre-impression { position:fixed; top:12px; right:12px; }',
+  '.barre-impression button { font:inherit; font-weight:700; border:none; border-radius:8px;',
+  '  padding:10px 18px; cursor:pointer; background:#5c82a3; color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.25); }',
+  '@media print { .barre-impression { display:none; } body { padding:0; max-width:none; } }'
+].join('\n');
+
 function imprimerDocument(type, id) {
   var doc = (type === 'devis' ? etat.devis : etat.factures).find(function (x) { return x.id === id; });
   if (!doc) return;
@@ -532,15 +580,13 @@ function imprimerDocument(type, id) {
   var total = nombre(doc.total) || sousTotal - remise;
 
   var html =
-    '<div class="document">' +
-
     // En-tête : grand titre + badge n° à gauche, logo à droite
     '<div class="doc-entete">' +
     '<div>' +
     '<div class="doc-titre">' + (estFacture ? 'FACTURE' : 'DEVIS') + '</div>' +
     '<span class="doc-badge">' + (estFacture ? 'Facture' : 'Devis') + ' n°' + echap(doc.numero) + '</span>' +
     '</div>' +
-    (cfg.logoUrl ? '<img class="logo" src="' + echap(cfg.logoUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '') +
+    (cfg.logoUrl ? '<img class="logo" src="' + echap(resoudreUrl(cfg.logoUrl)) + '" alt="" onerror="this.style.display=\'none\'">' : '') +
     '</div>' +
 
     // Dates
@@ -569,8 +615,8 @@ function imprimerDocument(type, id) {
     '</div></div>' +
 
     // Tableau des prestations
-    '<table class="doc-table"><thead><tr>' +
-    '<th style="width:46%">DESCRIPTION</th><th>PRIX</th><th>QUANTITÉ</th><th>TOTAL</th>' +
+    '<table><thead><tr>' +
+    '<th>DESCRIPTION</th><th>PRIX</th><th>QUANTITÉ</th><th>TOTAL</th>' +
     '</tr></thead><tbody>' +
     lignes.map(function (l) {
       return '<tr><td><strong>' + echap(l.desc) + '</strong></td>' +
@@ -611,11 +657,25 @@ function imprimerDocument(type, id) {
       : '') +
     '</div>' +
 
-    '<div class="doc-merci">' + echap(cfg.mentionsPied || 'Merci de votre confiance').toUpperCase() + '</div>' +
-    '</div>';
+    '<div class="doc-merci">' + echap(cfg.mentionsPied || 'Merci de votre confiance').toUpperCase() + '</div>';
 
-  $('#zone-impression').innerHTML = html;
-  window.print();
+  var titre = (estFacture ? 'Facture' : 'Devis') + ' n°' + doc.numero + ' — ' + (cfg.nomAsso || '');
+  var fenetre = window.open('', '_blank');
+  if (!fenetre) {
+    toast('Autorise les fenêtres pop-up pour ce site afin d\'imprimer', true);
+    return;
+  }
+  fenetre.document.write(
+    '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +
+    '<title>' + echap(titre) + '</title>' +
+    '<style>' + STYLE_DOCUMENT + '</style></head><body>' +
+    '<div class="barre-impression"><button onclick="window.print()">🖨️ Imprimer / enregistrer en PDF</button></div>' +
+    html +
+    '</body></html>'
+  );
+  fenetre.document.close();
+  // Laisse le temps au logo de charger avant d'ouvrir le dialogue d'impression
+  setTimeout(function () { fenetre.focus(); fenetre.print(); }, 500);
 }
 
 /* ---------------------------------------------------------------
