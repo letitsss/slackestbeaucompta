@@ -10,6 +10,7 @@ var etat = {
   factures: [],
   notes: [],
   compta: [],
+  benevoles: [],
   vue: 'accueil'
 };
 
@@ -141,6 +142,7 @@ async function rechargerDonnees() {
     etat.factures = data.factures || [];
     etat.notes = data.notes || [];
     etat.compta = data.compta || [];
+    etat.benevoles = data.benevoles || [];
   } finally {
     chargement(false);
   }
@@ -699,7 +701,9 @@ function vueNotes() {
       liste.map(function (n) {
         return '<tr>' +
           '<td>' + fmtDate(n.date) + '</td>' +
-          '<td>' + echap(n.benevole) + '</td>' +
+          '<td>' + echap(n.benevole) +
+          (n.saisiePar && n.saisiePar !== n.benevole
+            ? '<br><span class="texte-doux">saisie par ' + echap(n.saisiePar) + '</span>' : '') + '</td>' +
           '<td>' + echap(n.description) +
           (n.type === 'km'
             ? '<br><span class="texte-doux">🚗 ' + echap(n.depart) + ' → ' + echap(n.arrivee) + ' · ' + echap(n.km) + ' km' +
@@ -743,6 +747,15 @@ async function traiterNote(id, statut) {
 function editerNote() {
   var taux = nombre(etat.config.tauxKm) || 0.35;
 
+  var benevoles = (etat.benevoles || []).slice();
+  if (!benevoles.some(function (n) { return n.toLowerCase() === etat.prenom.toLowerCase(); })) {
+    benevoles.unshift(etat.prenom);
+  }
+  var optionsBenevoles = benevoles.map(function (n) {
+    var moi = n.toLowerCase() === etat.prenom.toLowerCase();
+    return '<option' + (moi ? ' selected' : '') + '>' + echap(n) + '</option>';
+  }).join('') + '<option value="__nouveau__">➕ Nouveau bénévole...</option>';
+
   ouvrirModale(
     '<h3>Nouvelle note de frais</h3>' +
     '<form id="form-note">' +
@@ -751,6 +764,9 @@ function editerNote() {
       '<option value="simple">Dépense simple (achat, repas...)</option>' +
       '<option value="km">Frais kilométriques (véhicule)</option></select>') +
     champ('Date de la dépense *', '<input id="nf-date" type="date" required value="' + aujourdhui() + '">') +
+    champ('Bénévole concerné *', '<select id="nf-benevole">' + optionsBenevoles + '</select>') +
+    '<div class="champ cache" id="nf-nouveau-champ"><label>Nom du nouveau bénévole *</label>' +
+    '<input id="nf-nouveau" placeholder="ex : Camille"></div>' +
     '</div>' +
 
     // — Dépense simple —
@@ -797,6 +813,9 @@ function editerNote() {
     $('#nf-section-simple').classList.toggle('cache', estKm);
     $('#nf-section-km').classList.toggle('cache', !estKm);
   });
+  $('#nf-benevole').addEventListener('change', function () {
+    $('#nf-nouveau-champ').classList.toggle('cache', this.value !== '__nouveau__');
+  });
   ['nf-nbkm', 'nf-essence', 'nf-peages'].forEach(function (idInput) {
     $('#' + idInput).addEventListener('input', recalculerKm);
   });
@@ -805,10 +824,17 @@ function editerNote() {
     e.preventDefault();
     var estKm = $('#nf-type').value === 'km';
 
+    var benevole = $('#nf-benevole').value;
+    if (benevole === '__nouveau__') {
+      benevole = $('#nf-nouveau').value.trim();
+      if (!benevole) { toast('Indique le nom du nouveau bénévole', true); return; }
+    }
+
     var note = {
       id: '',
       date: $('#nf-date').value,
-      benevole: etat.prenom,
+      benevole: benevole,
+      saisiePar: etat.prenom,
       type: estKm ? 'km' : 'simple',
       description: $('#nf-description').value.trim(),
       categorie: '',

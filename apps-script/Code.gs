@@ -17,14 +17,16 @@ var ONGLETS = {
   DEVIS: 'Devis',
   FACTURES: 'Factures',
   NOTES: 'NotesFrais',
-  COMPTA: 'Compta'
+  COMPTA: 'Compta',
+  BENEVOLES: 'Benevoles'
 };
 
 var COLONNES = {
   Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero'],
   Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement'],
-  NotesFrais: ['id', 'date', 'benevole', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
-  Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'reference', 'auteur']
+  NotesFrais: ['id', 'date', 'benevole', 'saisiePar', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
+  Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'reference', 'auteur'],
+  Benevoles: ['nom']
 };
 
 var CONFIG_DEFAUT = {
@@ -126,6 +128,7 @@ function traiter(req) {
 
   if (req.action === 'login') {
     if (!role) return { ok: false, erreur: 'Code invalide' };
+    ajouterBenevole(req.prenom);
     return { ok: true, role: role };
   }
 
@@ -207,8 +210,10 @@ function saveConfig(nouvelle) {
 function getData(role, prenom, config) {
   var notes = lireObjets(ONGLETS.NOTES);
   if (role !== 'tresorier') {
+    var moi = String(prenom || '').toLowerCase();
     notes = notes.filter(function (n) {
-      return String(n.benevole).toLowerCase() === String(prenom || '').toLowerCase();
+      return String(n.benevole).toLowerCase() === moi ||
+             String(n.saisiePar).toLowerCase() === moi;
     });
   }
   return {
@@ -218,8 +223,31 @@ function getData(role, prenom, config) {
     devis: lireObjets(ONGLETS.DEVIS),
     factures: lireObjets(ONGLETS.FACTURES),
     notes: notes,
-    compta: role === 'tresorier' ? lireObjets(ONGLETS.COMPTA) : []
+    compta: role === 'tresorier' ? lireObjets(ONGLETS.COMPTA) : [],
+    benevoles: lireBenevoles()
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Bénévoles (liste auto-alimentée)                                    */
+/* ------------------------------------------------------------------ */
+
+function lireBenevoles() {
+  var sh = feuille(ONGLETS.BENEVOLES);
+  if (sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues()
+    .map(function (l) { return String(l[0]).trim(); })
+    .filter(function (n) { return n; })
+    .sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+}
+
+function ajouterBenevole(nom) {
+  nom = String(nom || '').trim();
+  if (!nom) return;
+  var existants = lireBenevoles().map(function (n) { return n.toLowerCase(); });
+  if (existants.indexOf(nom.toLowerCase()) === -1) {
+    feuille(ONGLETS.BENEVOLES).appendRow([nom]);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -317,6 +345,7 @@ function marquerPayee(id, datePaiement) {
 function saveNote(note, justificatifBase64, justificatifNom, config) {
   if (!note.id) note.id = Utilities.getUuid();
   if (!note.statut) note.statut = 'soumise';
+  ajouterBenevole(note.benevole);
 
   if (justificatifBase64) {
     var dossier = dossierJustificatifs(config);
