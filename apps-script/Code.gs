@@ -23,7 +23,7 @@ var ONGLETS = {
 var COLONNES = {
   Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero'],
   Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement'],
-  NotesFrais: ['id', 'date', 'benevole', 'description', 'categorie', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
+  NotesFrais: ['id', 'date', 'benevole', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
   Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'reference', 'auteur']
 };
 
@@ -40,29 +40,48 @@ var CONFIG_DEFAUT = {
   mentionsPied: 'Merci de votre confiance',
   logoUrl: 'assets/logo.png',
   validiteDevis: '2 mois',
+  tauxKm: '0.35',
   conditionsPaiement: '40% à la validation du devis\nLe solde tout compte avant la prestation',
   codeTresorier: 'CHANGEMOI-TRESO',
   codeBenevole: 'CHANGEMOI-BENEVOLE',
   dossierJustificatifs: 'Justificatifs SlackEstBeau'
 };
 
-/** À exécuter UNE FOIS depuis l'éditeur Apps Script. */
+/** À exécuter à l'installation, puis à re-exécuter après chaque mise à jour
+ *  du script : ajoute les onglets, colonnes et clés de config manquants
+ *  sans jamais toucher aux données existantes. */
 function initialiser() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var cfg = ss.getSheetByName(ONGLETS.CONFIG) || ss.insertSheet(ONGLETS.CONFIG);
   if (cfg.getLastRow() < 1) {
-    var lignes = [['cle', 'valeur']];
-    Object.keys(CONFIG_DEFAUT).forEach(function (k) { lignes.push([k, CONFIG_DEFAUT[k]]); });
-    cfg.getRange(1, 1, lignes.length, 2).setValues(lignes);
+    cfg.getRange(1, 1, 1, 2).setValues([['cle', 'valeur']]);
     cfg.setFrozenRows(1);
   }
+  var clesExistantes = {};
+  if (cfg.getLastRow() > 1) {
+    cfg.getRange(2, 1, cfg.getLastRow() - 1, 1).getValues().forEach(function (l) {
+      clesExistantes[String(l[0])] = true;
+    });
+  }
+  Object.keys(CONFIG_DEFAUT).forEach(function (k) {
+    if (!clesExistantes[k]) cfg.appendRow([k, CONFIG_DEFAUT[k]]);
+  });
 
   Object.keys(COLONNES).forEach(function (nom) {
     var sh = ss.getSheetByName(nom) || ss.insertSheet(nom);
     if (sh.getLastRow() < 1) {
       sh.getRange(1, 1, 1, COLONNES[nom].length).setValues([COLONNES[nom]]);
       sh.setFrozenRows(1);
+    } else {
+      // Mise à jour : ajoute les colonnes manquantes à la fin
+      var entetes = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+      COLONNES[nom].forEach(function (col) {
+        if (entetes.indexOf(col) === -1) {
+          sh.getRange(1, entetes.length + 1).setValue(col);
+          entetes.push(col);
+        }
+      });
     }
   });
 

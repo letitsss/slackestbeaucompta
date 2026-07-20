@@ -700,7 +700,14 @@ function vueNotes() {
         return '<tr>' +
           '<td>' + fmtDate(n.date) + '</td>' +
           '<td>' + echap(n.benevole) + '</td>' +
-          '<td>' + echap(n.description) + (n.commentaire ? '<br><span class="texte-doux">💬 ' + echap(n.commentaire) + '</span>' : '') + '</td>' +
+          '<td>' + echap(n.description) +
+          (n.type === 'km'
+            ? '<br><span class="texte-doux">🚗 ' + echap(n.depart) + ' → ' + echap(n.arrivee) + ' · ' + echap(n.km) + ' km' +
+              ' (usure ' + euros(n.indemniteKm) +
+              (nombre(n.essence) ? ' · essence ' + euros(n.essence) : '') +
+              (nombre(n.peages) ? ' · péages ' + euros(n.peages) : '') + ')</span>'
+            : '') +
+          (n.commentaire ? '<br><span class="texte-doux">💬 ' + echap(n.commentaire) + '</span>' : '') + '</td>' +
           '<td>' + echap(n.categorie) + '</td>' +
           '<td class="num">' + euros(n.montant) + '</td>' +
           '<td>' + (n.justificatifUrl ? '<a href="' + echap(n.justificatifUrl) + '" target="_blank" rel="noopener">📎 voir</a>' : '—') + '</td>' +
@@ -734,25 +741,110 @@ async function traiterNote(id, statut) {
 }
 
 function editerNote() {
+  var taux = nombre(etat.config.tauxKm) || 0.35;
+
   ouvrirModale(
     '<h3>Nouvelle note de frais</h3>' +
     '<form id="form-note">' +
     '<div class="grille-form">' +
+    champ('Type de note *', '<select id="nf-type">' +
+      '<option value="simple">Dépense simple (achat, repas...)</option>' +
+      '<option value="km">Frais kilométriques (véhicule)</option></select>') +
     champ('Date de la dépense *', '<input id="nf-date" type="date" required value="' + aujourdhui() + '">') +
+    '</div>' +
+
+    // — Dépense simple —
+    '<div id="nf-section-simple"><div class="grille-form">' +
     champ('Catégorie', '<select id="nf-categorie">' + CATEGORIES_NOTES.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>') +
-    champ('Description *', '<input id="nf-description" required placeholder="ex : Essence aller-retour Passy, animation highline">', true) +
-    champ('Montant (€) *', '<input id="nf-montant" required inputmode="decimal" placeholder="ex : 34,50">') +
+    champ('Montant (€) *', '<input id="nf-montant" inputmode="decimal" placeholder="ex : 34,50">') +
+    '</div></div>' +
+
+    // — Frais kilométriques —
+    '<div id="nf-section-km" class="cache">' +
+    '<div class="grille-form">' +
+    champ('Départ *', '<input id="nf-depart" placeholder="ex : Annecy">') +
+    champ('Arrivée *', '<input id="nf-arrivee" placeholder="ex : Passy">') +
+    champ('Nombre de kilomètres *', '<input id="nf-nbkm" inputmode="decimal" placeholder="ex : 120 (aller-retour compris)">') +
+    champ('Essence (€)', '<input id="nf-essence" inputmode="decimal" placeholder="0">') +
+    champ('Péages (€)', '<input id="nf-peages" inputmode="decimal" placeholder="0">') +
+    champ('Usure du véhicule (' + taux.toLocaleString('fr-FR') + ' €/km)', '<input id="nf-usure" disabled value="0,00 €">') +
+    '</div>' +
+    '<div class="total-general" style="font-size:16px">Total à rembourser : <span id="nf-total-km">0,00 €</span></div>' +
+    '</div>' +
+
+    '<div class="grille-form">' +
+    champ('Description', '<input id="nf-description" placeholder="ex : animation highline fête du sport">', true) +
     champ('Justificatif (photo ou PDF)', '<input id="nf-fichier" type="file" accept="image/*,.pdf" capture="environment">') +
     '</div>' +
-    '<p class="texte-doux" style="font-size:12.5px">📷 Les photos sont compressées automatiquement avant envoi.</p>' +
+    '<p class="texte-doux" style="font-size:12.5px">📷 Les photos sont compressées automatiquement avant envoi. Pour un trajet, joins si possible le ticket d\'essence ou de péage.</p>' +
     '<div class="barre-actions">' +
     '<button type="submit" class="btn btn-primaire">📤 Soumettre</button>' +
     '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
     '</div></form>'
   );
 
+  function recalculerKm() {
+    var km = nombre($('#nf-nbkm').value);
+    var usure = Math.round(km * taux * 100) / 100;
+    var total = usure + nombre($('#nf-essence').value) + nombre($('#nf-peages').value);
+    $('#nf-usure').value = euros(usure);
+    $('#nf-total-km').textContent = euros(total);
+    return { usure: usure, total: Math.round(total * 100) / 100 };
+  }
+
+  $('#nf-type').addEventListener('change', function () {
+    var estKm = this.value === 'km';
+    $('#nf-section-simple').classList.toggle('cache', estKm);
+    $('#nf-section-km').classList.toggle('cache', !estKm);
+  });
+  ['nf-nbkm', 'nf-essence', 'nf-peages'].forEach(function (idInput) {
+    $('#' + idInput).addEventListener('input', recalculerKm);
+  });
+
   $('#form-note').addEventListener('submit', async function (e) {
     e.preventDefault();
+    var estKm = $('#nf-type').value === 'km';
+
+    var note = {
+      id: '',
+      date: $('#nf-date').value,
+      benevole: etat.prenom,
+      type: estKm ? 'km' : 'simple',
+      description: $('#nf-description').value.trim(),
+      categorie: '',
+      depart: '', arrivee: '', km: '', essence: '', peages: '', indemniteKm: '',
+      montant: 0,
+      justificatifUrl: '',
+      statut: 'soumise',
+      commentaire: ''
+    };
+
+    if (estKm) {
+      var depart = $('#nf-depart').value.trim();
+      var arrivee = $('#nf-arrivee').value.trim();
+      var km = nombre($('#nf-nbkm').value);
+      if (!depart || !arrivee || !km) {
+        toast('Renseigne le départ, l\'arrivée et le nombre de kilomètres', true);
+        return;
+      }
+      var calc = recalculerKm();
+      note.categorie = 'Déplacement';
+      note.depart = depart;
+      note.arrivee = arrivee;
+      note.km = km;
+      note.essence = nombre($('#nf-essence').value);
+      note.peages = nombre($('#nf-peages').value);
+      note.indemniteKm = calc.usure;
+      note.montant = calc.total;
+      if (!note.description) note.description = 'Trajet ' + depart + ' → ' + arrivee;
+    } else {
+      var montant = nombre($('#nf-montant').value);
+      if (!montant) { toast('Indique le montant de la dépense', true); return; }
+      if (!note.description) { toast('Ajoute une description', true); return; }
+      note.categorie = $('#nf-categorie').value;
+      note.montant = montant;
+    }
+
     var fichier = $('#nf-fichier').files[0] || null;
     var base64 = null, nomFichier = null;
     if (fichier) {
@@ -764,17 +856,7 @@ function editerNote() {
         chargement(false);
       }
     }
-    var note = {
-      id: '',
-      date: $('#nf-date').value,
-      benevole: etat.prenom,
-      description: $('#nf-description').value.trim(),
-      categorie: $('#nf-categorie').value,
-      montant: nombre($('#nf-montant').value),
-      justificatifUrl: '',
-      statut: 'soumise',
-      commentaire: ''
-    };
+
     await action(function () { return Api.saveNote(note, base64, nomFichier); }, 'Note de frais soumise ✔');
     fermerModale();
     await rechargerDonnees();
@@ -1013,6 +1095,7 @@ function vueParametres() {
     inp('iban', 'IBAN', 'FR76...') +
     inp('bic', 'BIC') +
     inp('validiteDevis', 'Validité des devis', 'ex : 2 mois') +
+    inp('tauxKm', 'Taux kilométrique notes de frais (€/km)', '0.35') +
     champ('Mention d\'exonération (sous le total)', '<input id="pr-mentionTva" value="' + echap(c.mentionTva || '') + '">') +
     champ('Conditions de paiement par défaut (devis)', '<textarea id="pr-conditionsPaiement" rows="2">' + echap(c.conditionsPaiement || '') + '</textarea>') +
     champ('Phrase de pied de page', '<input id="pr-mentionsPied" value="' + echap(c.mentionsPied || '') + '">') +
@@ -1027,7 +1110,7 @@ function vueParametres() {
   $('#form-parametres').addEventListener('submit', async function (e) {
     e.preventDefault();
     var cles = ['nomAsso', 'email', 'adresse', 'telephone', 'rna', 'siren', 'logoUrl',
-      'iban', 'bic', 'validiteDevis', 'mentionTva', 'conditionsPaiement', 'mentionsPied',
+      'iban', 'bic', 'validiteDevis', 'tauxKm', 'mentionTva', 'conditionsPaiement', 'mentionsPied',
       'codeTresorier', 'codeBenevole'];
     var config = {};
     cles.forEach(function (k) { config[k] = $('#pr-' + k).value.trim(); });
