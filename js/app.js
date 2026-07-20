@@ -687,12 +687,39 @@ function imprimerDocument(type, id) {
 
 function vueNotes() {
   var liste = etat.notes.slice().reverse();
+
+  // Trésorier : remboursements groupés par bénévole (un virement par mois)
+  var carteRemboursements = '';
+  if (etat.role === 'tresorier') {
+    var parBenevole = {};
+    etat.notes.filter(function (n) { return n.statut === 'validée'; }).forEach(function (n) {
+      (parBenevole[n.benevole] = parBenevole[n.benevole] || []).push(n);
+    });
+    var noms = Object.keys(parBenevole).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+    if (noms.length) {
+      carteRemboursements =
+        '<div class="carte"><h3>💶 Remboursements à faire (un virement par bénévole)</h3>' +
+        '<div class="conteneur-tableau"><table><tbody>' +
+        noms.map(function (nom) {
+          var notes = parBenevole[nom];
+          var total = Math.round(notes.reduce(function (s, n) { return s + nombre(n.montant); }, 0) * 100) / 100;
+          return '<tr><td><strong>' + echap(nom) + '</strong></td>' +
+            '<td>' + notes.length + ' note(s) validée(s)</td>' +
+            '<td class="num"><strong>' + euros(total) + '</strong></td>' +
+            '<td><button class="btn btn-petit btn-accent" onclick="rembourserGroupe(\'' + echap(nom).replace(/'/g, "\\'") + '\')">Rembourser ' + euros(total) + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="texte-doux" style="font-size:12.5px;margin-top:8px">Fais le virement bancaire du montant exact, puis clique « Rembourser » : toutes les notes du bénévole passent « remboursées » et <strong>une seule dépense</strong> du même montant est créée en compta — le rapprochement bancaire la pointera automatiquement.</p>' +
+        '</div>';
+    }
+  }
+
   $('#vue').innerHTML =
     '<div class="entete-vue"><h2>Notes de frais</h2>' +
     '<button class="btn btn-primaire" onclick="editerNote()">➕ Nouvelle note</button></div>' +
     (etat.role === 'tresorier'
-      ? '<p class="texte-doux" style="margin-bottom:14px">Vue trésorier : toutes les notes. « Rembourser » ajoute automatiquement la dépense en compta.</p>'
+      ? '<p class="texte-doux" style="margin-bottom:14px">Vue trésorier : valide les notes au fil de l\'eau, puis rembourse en un virement mensuel par bénévole (encadré ci-dessous).</p>'
       : '<p class="texte-doux" style="margin-bottom:14px">Tes notes de frais. Ajoute une photo du justificatif, le trésorier valide puis rembourse.</p>') +
+    carteRemboursements +
     '<div class="carte">' +
     (!liste.length ? '<p class="vide">Aucune note de frais.</p>' :
       '<div class="conteneur-tableau"><table><thead><tr>' +
@@ -729,9 +756,52 @@ function actionsNote(n) {
       '<button class="btn btn-petit btn-danger" onclick="traiterNote(\'' + n.id + '\', \'refusée\')">Refuser</button>';
   }
   if (n.statut === 'validée') {
-    return '<button class="btn btn-petit btn-accent" onclick="traiterNote(\'' + n.id + '\', \'remboursée\')">💶 Rembourser</button>';
+    return '<span class="texte-doux" style="font-size:12px">à rembourser ⤴</span>';
   }
   return '';
+}
+
+/** Rembourse d'un coup toutes les notes validées d'un bénévole :
+ *  une seule dépense en compta = le montant du virement bancaire. */
+async function rembourserGroupe(benevole) {
+  var notes = etat.notes.filter(function (n) {
+    return n.statut === 'validée' && n.benevole === benevole;
+  });
+  if (!notes.length) return;
+  var total = Math.round(notes.reduce(function (s, n) { return s + nombre(n.montant); }, 0) * 100) / 100;
+
+  if (!confirm('Rembourser ' + benevole + ' : ' + notes.length + ' note(s), total ' + euros(total) +
+    '.\n\nFais (ou vérifie) le virement bancaire de ce montant exact, puis confirme : une dépense unique de ' +
+    euros(total) + ' sera créée en compta.')) return;
+
+  chargement(true);
+  try {
+    for (var i = 0; i < notes.length; i++) {
+      notes[i].statut = 'remboursée';
+      await Api.saveNote(notes[i]);
+    }
+    await Api.saveCompta({
+      id: '',
+      date: aujourdhui(),
+      type: 'dépense',
+      categorie: 'Notes de frais',
+      libelle: 'Remboursement notes de frais ' + benevole + ' (' + notes.length + ' note' + (notes.length > 1 ? 's' : '') + ')',
+      montant: total,
+      compte: 'Banque',
+      compteDest: '',
+      mode: 'Virement',
+      reference: 'RBT-' + aujourdhui() + '-' + hashCourt(benevole + total + notes.map(function (n) { return n.id; }).join()),
+      pointee: '',
+      auteur: etat.prenom
+    });
+    toast(benevole + ' remboursé(e) : ' + euros(total) + ' — dépense créée en compta ✔');
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    chargement(false);
+  }
+  await rechargerDonnees();
+  naviguer('notes');
 }
 
 async function traiterNote(id, statut) {
