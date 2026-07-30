@@ -735,7 +735,7 @@ function vueNotes() {
           '<td>' + echap(n.description) +
           (n.type === 'km'
             ? '<br><span class="texte-doux">🚗 ' + echap(n.depart) + ' → ' + echap(n.arrivee) + ' · ' + echap(n.km) + ' km' +
-              ' (usure ' + euros(n.indemniteKm) +
+              ' (indemnité km ' + euros(n.indemniteKm) +
               (nombre(n.essence) ? ' · essence ' + euros(n.essence) : '') +
               (nombre(n.peages) ? ' · péages ' + euros(n.peages) : '') + ')</span>'
             : '') +
@@ -852,10 +852,10 @@ function editerNote() {
     champ('Départ *', '<input id="nf-depart" placeholder="ex : Annecy">') +
     champ('Arrivée *', '<input id="nf-arrivee" placeholder="ex : Passy">') +
     champ('Nombre de kilomètres *', '<input id="nf-nbkm" inputmode="decimal" placeholder="ex : 120 (aller-retour compris)">') +
-    champ('Essence (€)', '<input id="nf-essence" inputmode="decimal" placeholder="0">') +
     champ('Péages (€)', '<input id="nf-peages" inputmode="decimal" placeholder="0">') +
-    champ('Usure du véhicule (' + taux.toLocaleString('fr-FR') + ' €/km)', '<input id="nf-usure" disabled value="0,00 €">') +
+    champ('Indemnité kilométrique (' + taux.toLocaleString('fr-FR') + ' €/km)', '<input id="nf-usure" disabled value="0,00 €">') +
     '</div>' +
+    '<p class="texte-doux" style="font-size:12.5px">L\'indemnité kilométrique couvre l\'essence et l\'usure du véhicule — ne pas ajouter le plein à part.</p>' +
     '<div class="total-general" style="font-size:16px">Total à rembourser : <span id="nf-total-km">0,00 €</span></div>' +
     '</div>' +
 
@@ -863,7 +863,7 @@ function editerNote() {
     champ('Description', '<input id="nf-description" placeholder="ex : animation highline fête du sport">', true) +
     champ('Justificatif (photo ou PDF)', '<input id="nf-fichier" type="file" accept="image/*,.pdf" capture="environment">') +
     '</div>' +
-    '<p class="texte-doux" style="font-size:12.5px">📷 Les photos sont compressées automatiquement avant envoi. Pour un trajet, joins si possible le ticket d\'essence ou de péage.</p>' +
+    '<p class="texte-doux" style="font-size:12.5px">📷 Les photos sont compressées automatiquement avant envoi. Pour un trajet avec péage, joins si possible le ticket.</p>' +
     '<div class="barre-actions">' +
     '<button type="submit" class="btn btn-primaire">📤 Soumettre</button>' +
     '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
@@ -873,7 +873,7 @@ function editerNote() {
   function recalculerKm() {
     var km = nombre($('#nf-nbkm').value);
     var usure = Math.round(km * taux * 100) / 100;
-    var total = usure + nombre($('#nf-essence').value) + nombre($('#nf-peages').value);
+    var total = usure + nombre($('#nf-peages').value);
     $('#nf-usure').value = euros(usure);
     $('#nf-total-km').textContent = euros(total);
     return { usure: usure, total: Math.round(total * 100) / 100 };
@@ -887,7 +887,7 @@ function editerNote() {
   $('#nf-benevole').addEventListener('change', function () {
     $('#nf-nouveau-champ').classList.toggle('cache', this.value !== '__nouveau__');
   });
-  ['nf-nbkm', 'nf-essence', 'nf-peages'].forEach(function (idInput) {
+  ['nf-nbkm', 'nf-peages'].forEach(function (idInput) {
     $('#' + idInput).addEventListener('input', recalculerKm);
   });
 
@@ -929,7 +929,7 @@ function editerNote() {
       note.depart = depart;
       note.arrivee = arrivee;
       note.km = km;
-      note.essence = nombre($('#nf-essence').value);
+      note.essence = '';
       note.peages = nombre($('#nf-peages').value);
       note.indemniteKm = calc.usure;
       note.montant = calc.total;
