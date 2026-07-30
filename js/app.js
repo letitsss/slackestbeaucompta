@@ -1444,6 +1444,14 @@ function analyserReleveBanque(texte) {
   var iLibelle = col(/^libell/);
   if (iLibelle === -1) throw new Error('Colonne Libellé introuvable dans le fichier');
 
+  // Colonnes optionnelles d'un fichier préparé (migration d'historique) :
+  // la catégorie/type/mode sont alors imposés au lieu d'être devinés
+  var iTypeE = col(/^typeecriture/);
+  var iCategorie = col(/^categorie/);
+  var iMode = col(/^mode$/);
+  var iCompte = col(/^compte$/);
+  var iCompteDest = col(/^comptedest/);
+
   var ops = [];
   for (var n = iEntete + 1; n < tableau.length; n++) {
     var l = tableau[n];
@@ -1466,10 +1474,20 @@ function analyserReleveBanque(texte) {
     }
 
     var libelle = String(l[iLibelle] || '').replace(/\s+/g, ' ').trim();
-    ops.push({
+    var op = {
       date: date, montant: Math.round(montant * 100) / 100, sens: sens, libelle: libelle,
       reference: 'CE-' + date + '-' + (sens === 'credit' ? '+' : '-') + montant + '-' + hashCourt(libelle)
-    });
+    };
+    if (iTypeE !== -1 && String(l[iTypeE] || '').trim()) {
+      op.force = {
+        type: String(l[iTypeE]).trim(),
+        categorie: iCategorie !== -1 ? String(l[iCategorie] || '').trim() : '',
+        mode: iMode !== -1 ? String(l[iMode] || '').trim() : '',
+        compte: iCompte !== -1 ? String(l[iCompte] || '').trim() : '',
+        compteDest: iCompteDest !== -1 ? String(l[iCompteDest] || '').trim() : ''
+      };
+    }
+    ops.push(op);
   }
   if (!ops.length) throw new Error('Aucune opération trouvée dans le fichier');
   return ops;
@@ -1482,6 +1500,14 @@ function devinerEcriture(op) {
     date: op.date, libelle: op.libelle, montant: op.montant,
     compte: 'Banque', compteDest: '', reference: op.reference, pointee: 'oui'
   };
+  if (op.force) {
+    e.type = op.force.type;
+    e.categorie = op.force.categorie || '';
+    e.mode = op.force.mode || '';
+    e.compte = op.force.compte || (e.type === 'virement' ? 'HelloAsso' : 'Banque');
+    e.compteDest = e.type === 'virement' ? (op.force.compteDest || 'Banque') : '';
+    return e;
+  }
   if (/HELLOASSO/.test(lib) && op.sens === 'credit') {
     e.type = 'virement'; e.compte = 'HelloAsso'; e.compteDest = 'Banque';
     e.categorie = ''; e.mode = ''; e.libelle = 'Versement HelloAsso — ' + op.date.slice(0, 7);
@@ -1523,6 +1549,7 @@ function rapprocherOperations(ops) {
   var resultat = { aPointer: [], dejaTraitees: [], aCreer: [] };
   ops.forEach(function (op) {
     if (refsExistantes[op.reference]) { resultat.dejaTraitees.push(op); return; }
+    if (op.force && op.force.type === 'report') { resultat.aCreer.push(op); return; }
     var indice = -1;
     for (var i = 0; i < pool.length; i++) {
       var l = pool[i];
@@ -1586,7 +1613,10 @@ function importerReleveBanque() {
           r.aCreer.map(function (op, i) {
             var e = devinerEcriture(op);
             var options;
-            if (e.type === 'virement') {
+            if (op.force) {
+              // Fichier préparé : catégorie imposée, pas de choix à faire
+              options = null;
+            } else if (e.type === 'virement') {
               options = '<option value="__virement__" selected>Virement HelloAsso → Banque</option>' +
                 CATEGORIES_RECETTES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
             } else if (op.sens === 'credit') {
@@ -1604,7 +1634,11 @@ function importerReleveBanque() {
               '<td style="max-width:280px">' + echap(op.libelle.slice(0, 90)) + '</td>' +
               '<td class="num" style="font-weight:700;color:' + (op.sens === 'credit' ? 'var(--succes)' : 'var(--danger)') + '">' +
               (op.sens === 'credit' ? '+' : '−') + ' ' + euros(op.montant) + '</td>' +
-              '<td><select class="rb-categorie" data-i="' + i + '" style="min-width:150px">' + options + '</select></td>' +
+              (options === null
+                ? '<td>' + echap(e.type === 'report' ? 'Report de solde'
+                    : e.type === 'virement' ? 'Virement ' + e.compte + ' → ' + e.compteDest
+                    : e.type + ' · ' + e.categorie) + '</td>'
+                : '<td><select class="rb-categorie" data-i="' + i + '" style="min-width:150px">' + options + '</select></td>') +
               '</tr>';
           }).join('') + '</tbody></table></div></div>';
       }
@@ -1634,7 +1668,9 @@ function importerReleveBanque() {
         if (!coche.checked) return;
         var idx = parseInt(coche.dataset.i, 10);
         var e = devinerEcriture(r.aCreer[idx]);
-        var choix = document.querySelector('.rb-categorie[data-i="' + idx + '"]').value;
+        var selection = document.querySelector('.rb-categorie[data-i="' + idx + '"]');
+        if (!selection) { aImporter.push(e); return; } // fichier préparé : rien à ajuster
+        var choix = selection.value;
         if (choix === '__virement__') {
           e.type = 'virement'; e.compte = 'HelloAsso'; e.compteDest = 'Banque'; e.categorie = ''; e.mode = '';
         } else {
