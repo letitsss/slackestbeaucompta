@@ -17,7 +17,7 @@ var etat = {
 var CATEGORIES_RECETTES = ['Prestations', 'Adhésions', 'Goodies', 'Subventions', 'Dons', 'Buvette / événements', 'Autre recette'];
 var MODES_PAIEMENT = ['Virement', 'CB', 'Espèces', 'Chèque', 'HelloAsso', 'Prélèvement'];
 var CATEGORIES_DEPENSES = ['Matériel', 'Déplacements', 'Notes de frais', 'Assurance', 'Communication', 'Frais bancaires', 'Location / salle', 'Autre dépense'];
-var CATEGORIES_NOTES = ['Déplacement', 'Repas', 'Matériel', 'Hébergement', 'Autre'];
+var CATEGORIES_NOTES = ['Repas', 'Matériel', 'Hébergement', 'Autre'];
 
 /* ---------------------------------------------------------------
    Utilitaires
@@ -1004,7 +1004,7 @@ function editerNote(id) {
         return;
       }
       var calc = recalculerKm();
-      note.categorie = 'Déplacement';
+      note.categorie = 'Frais kilométriques';
       note.depart = depart;
       note.arrivee = arrivee;
       note.km = km;
