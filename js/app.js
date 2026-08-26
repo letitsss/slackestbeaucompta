@@ -429,9 +429,68 @@ function detailDevis(id) {
     (!d.factureNumero ? '<button class="btn btn-accent" onclick="convertirDevis(\'' + d.id + '\')">🧾 Convertir en facture</button>' : '') +
     (!d.factureNumero ? '<button class="btn" onclick="editerDevis(\'' + d.id + '\')">✏️ Modifier</button>' : '') +
     ((d.statut === 'brouillon' || etat.role === 'tresorier') ? '<button class="btn btn-danger" onclick="supprimerDevis(\'' + d.id + '\')">🗑 Supprimer</button>' : '') +
+    (etat.role === 'tresorier' ? '<button class="btn" title="Corriger le numéro ou la date" onclick="editerNumeroDate(\'devis\', \'' + d.id + '\')">🔢 N° / date</button>' : '') +
     '<button class="btn" onclick="fermerModale()">Fermer</button>' +
     '</div>'
   );
+}
+
+/** Trésorier : corrige le numéro et/ou la date d'un devis ou d'une facture
+ *  (ex : documents anciens re-saisis dans le désordre), en gardant
+ *  cohérents les liens devis ↔ facture. */
+function editerNumeroDate(type, id) {
+  var estFacture = type === 'facture';
+  var liste = estFacture ? etat.factures : etat.devis;
+  var doc = liste.find(function (x) { return x.id === id; });
+  if (!doc) return;
+
+  ouvrirModale(
+    '<h3>🔢 Corriger ' + (estFacture ? 'la facture' : 'le devis') + ' n°' + echap(doc.numero) + '</h3>' +
+    '<p class="texte-doux">Format des numéros : année + rang, ex : <strong>202603</strong>. Le numéro doit être unique. ' +
+    (estFacture ? 'Le devis d\'origine sera mis à jour automatiquement.' : 'La facture issue de ce devis sera mise à jour automatiquement.') + '</p>' +
+    '<form id="form-numdate"><div class="grille-form">' +
+    champ('Numéro *', '<input id="nd-numero" required value="' + echap(doc.numero) + '" inputmode="numeric">') +
+    champ('Date *', '<input id="nd-date" type="date" required value="' + echap(doc.date) + '">') +
+    (estFacture ? champ('Date de paiement (si payée)', '<input id="nd-datePaiement" type="date" value="' + echap(doc.datePaiement || '') + '">') : '') +
+    '</div><div class="barre-actions">' +
+    '<button type="submit" class="btn btn-primaire">💾 Enregistrer</button>' +
+    '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
+    '</div></form>'
+  );
+
+  $('#form-numdate').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var nouveau = $('#nd-numero').value.trim();
+    var ancien = String(doc.numero);
+    if (!/^\d{6,}$/.test(nouveau)) { toast('Numéro attendu au format année + rang, ex : 202603', true); return; }
+    if (nouveau !== ancien && liste.some(function (x) { return String(x.numero) === nouveau; })) {
+      toast('Le n°' + nouveau + ' existe déjà — change d\'abord l\'autre document', true); return;
+    }
+    doc.numero = nouveau;
+    doc.date = $('#nd-date').value;
+    if (estFacture) doc.datePaiement = $('#nd-datePaiement').value || '';
+
+    chargement(true);
+    try {
+      if (estFacture) {
+        await Api.saveFacture(doc);
+        var devisLies = etat.devis.filter(function (d) { return String(d.factureNumero) === ancien; });
+        for (var i = 0; i < devisLies.length; i++) { devisLies[i].factureNumero = nouveau; await Api.saveDevis(devisLies[i]); }
+      } else {
+        await Api.saveDevis(doc);
+        var facturesLiees = etat.factures.filter(function (f) { return String(f.devisNumero) === ancien; });
+        for (var j = 0; j < facturesLiees.length; j++) { facturesLiees[j].devisNumero = nouveau; await Api.saveFacture(facturesLiees[j]); }
+      }
+      toast((estFacture ? 'Facture' : 'Devis') + ' n°' + nouveau + ' enregistré ✔');
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      chargement(false);
+    }
+    fermerModale();
+    await rechargerDonnees();
+    naviguer(estFacture ? 'factures' : 'devis');
+  });
 }
 
 async function convertirDevis(id) {
@@ -498,7 +557,8 @@ function detailFacture(id) {
     (etat.role === 'tresorier' && f.statut !== 'payée'
       ? '<button class="btn btn-accent" onclick="marquerPayee(\'' + f.id + '\')">✅ Marquer payée</button>' : '') +
     (etat.role === 'tresorier'
-      ? '<button class="btn btn-danger" onclick="supprimerFacture(\'' + f.id + '\')">🗑 Supprimer</button>' : '') +
+      ? '<button class="btn btn-danger" onclick="supprimerFacture(\'' + f.id + '\')">🗑 Supprimer</button>' +
+        '<button class="btn" title="Corriger le numéro ou la date" onclick="editerNumeroDate(\'facture\', \'' + f.id + '\')">🔢 N° / date</button>' : '') +
     '<button class="btn" onclick="fermerModale()">Fermer</button>' +
     '</div>'
   );
