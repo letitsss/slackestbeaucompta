@@ -685,8 +685,44 @@ function imprimerDocument(type, id) {
    Vue : notes de frais
    --------------------------------------------------------------- */
 
+var filtresNotes = { statut: '', benevole: '', tri: 'date' };
+
 function vueNotes() {
-  var liste = etat.notes.slice().reverse();
+  var f = filtresNotes;
+  var liste = etat.notes.filter(function (n) {
+    return (!f.statut || n.statut === f.statut) && (!f.benevole || n.benevole === f.benevole);
+  });
+  var tris = {
+    date: function (a, b) { return String(b.date).localeCompare(String(a.date)); },
+    benevole: function (a, b) {
+      return String(a.benevole).localeCompare(String(b.benevole), 'fr') || String(b.date).localeCompare(String(a.date));
+    },
+    statut: function (a, b) {
+      return String(a.statut).localeCompare(String(b.statut), 'fr') || String(b.date).localeCompare(String(a.date));
+    },
+    montant: function (a, b) { return nombre(b.montant) - nombre(a.montant); }
+  };
+  liste.sort(tris[f.tri] || tris.date);
+  var totalListe = liste.reduce(function (s, n) { return s + nombre(n.montant); }, 0);
+
+  var benevolesPresents = {};
+  etat.notes.forEach(function (n) { if (n.benevole) benevolesPresents[n.benevole] = true; });
+  var barreFiltres =
+    '<div class="filtres">' +
+    '<select id="nt-statut"><option value="">Tous les statuts</option>' +
+    ['soumise', 'validée', 'remboursée', 'refusée'].map(function (s) {
+      return '<option' + (s === f.statut ? ' selected' : '') + '>' + s + '</option>';
+    }).join('') + '</select>' +
+    '<select id="nt-benevole"><option value="">Tous les bénévoles</option>' +
+    Object.keys(benevolesPresents).sort(function (a, b) { return a.localeCompare(b, 'fr'); }).map(function (b) {
+      return '<option' + (b === f.benevole ? ' selected' : '') + '>' + echap(b) + '</option>';
+    }).join('') + '</select>' +
+    '<select id="nt-tri">' +
+    [['date', 'Tri : date'], ['benevole', 'Tri : bénévole'], ['statut', 'Tri : statut'], ['montant', 'Tri : montant']].map(function (t) {
+      return '<option value="' + t[0] + '"' + (t[0] === f.tri ? ' selected' : '') + '>' + t[1] + '</option>';
+    }).join('') + '</select>' +
+    '<span class="texte-doux" style="align-self:center">' + liste.length + ' note(s) · ' + euros(totalListe) + '</span>' +
+    '</div>';
 
   // Trésorier : remboursements groupés par bénévole (un virement par mois)
   var carteRemboursements = '';
@@ -718,13 +754,13 @@ function vueNotes() {
     '<button class="btn btn-primaire" onclick="editerNote()">➕ Nouvelle note</button></div>' +
     (etat.role === 'tresorier'
       ? '<p class="texte-doux" style="margin-bottom:14px">Vue trésorier : valide les notes au fil de l\'eau, puis rembourse en un virement mensuel par bénévole (encadré ci-dessous).</p>'
-      : '<p class="texte-doux" style="margin-bottom:14px">Tes notes de frais. Ajoute une photo du justificatif, le trésorier valide puis rembourse.</p>') +
+      : '<p class="texte-doux" style="margin-bottom:14px">Tes notes de frais. Tu peux les modifier ✏️ ou les supprimer 🗑 tant que le trésorier ne les a pas traitées.</p>') +
     carteRemboursements +
     '<div class="carte">' +
+    barreFiltres +
     (!liste.length ? '<p class="vide">Aucune note de frais.</p>' :
       '<div class="conteneur-tableau"><table><thead><tr>' +
-      '<th>Date</th><th>Bénévole</th><th>Description</th><th>Catégorie</th><th class="num">Montant</th><th>Justif.</th><th>Statut</th>' +
-      (etat.role === 'tresorier' ? '<th></th>' : '') +
+      '<th>Date</th><th>Bénévole</th><th>Description</th><th>Catégorie</th><th class="num">Montant</th><th>Justif.</th><th>Statut</th><th></th>' +
       '</tr></thead><tbody>' +
       liste.map(function (n) {
         return '<tr>' +
@@ -744,21 +780,51 @@ function vueNotes() {
           '<td class="num">' + euros(n.montant) + '</td>' +
           '<td>' + (n.justificatifUrl ? '<a href="' + echap(n.justificatifUrl) + '" target="_blank" rel="noopener">📎 voir</a>' : '—') + '</td>' +
           '<td>' + badgeStatut(n.statut) + '</td>' +
-          (etat.role === 'tresorier' ? '<td>' + actionsNote(n) + '</td>' : '') +
+          '<td>' + actionsNote(n) + '</td>' +
           '</tr>';
       }).join('') + '</tbody></table></div>') +
     '</div>';
+
+  ['nt-statut', 'nt-benevole', 'nt-tri'].forEach(function (idSel) {
+    $('#' + idSel).addEventListener('change', function () {
+      filtresNotes.statut = $('#nt-statut').value;
+      filtresNotes.benevole = $('#nt-benevole').value;
+      filtresNotes.tri = $('#nt-tri').value;
+      vueNotes();
+    });
+  });
+}
+
+/** Une note se modifie/supprime tant qu'elle n'est pas traitée (soumise ou refusée),
+ *  par son bénévole (ou celui qui l'a saisie) ou par le trésorier. */
+function peutModifierNote(n) {
+  if (n.statut !== 'soumise' && n.statut !== 'refusée') return false;
+  if (etat.role === 'tresorier') return true;
+  var moi = etat.prenom.toLowerCase();
+  return String(n.benevole).toLowerCase() === moi || String(n.saisiePar || '').toLowerCase() === moi;
 }
 
 function actionsNote(n) {
-  if (n.statut === 'soumise') {
-    return '<button class="btn btn-petit btn-primaire" onclick="traiterNote(\'' + n.id + '\', \'validée\')">Valider</button> ' +
-      '<button class="btn btn-petit btn-danger" onclick="traiterNote(\'' + n.id + '\', \'refusée\')">Refuser</button>';
+  var h = '';
+  if (etat.role === 'tresorier' && n.statut === 'soumise') {
+    h += '<button class="btn btn-petit btn-primaire" onclick="traiterNote(\'' + n.id + '\', \'validée\')">Valider</button> ' +
+      '<button class="btn btn-petit btn-danger" onclick="traiterNote(\'' + n.id + '\', \'refusée\')">Refuser</button> ';
   }
-  if (n.statut === 'validée') {
-    return '<span class="texte-doux" style="font-size:12px">à rembourser ⤴</span>';
+  if (etat.role === 'tresorier' && n.statut === 'validée') {
+    h += '<button class="btn btn-petit" title="Remettre en attente (annule la validation)" onclick="traiterNote(\'' + n.id + '\', \'soumise\')">↩ En attente</button> ';
   }
-  return '';
+  if (peutModifierNote(n)) {
+    h += '<button class="btn btn-petit" title="Modifier" onclick="editerNote(\'' + n.id + '\')">✏️</button> ' +
+      '<button class="btn btn-petit btn-danger" title="Supprimer" onclick="supprimerNote(\'' + n.id + '\')">🗑</button>';
+  }
+  return '<span style="white-space:nowrap">' + h + '</span>';
+}
+
+async function supprimerNote(id) {
+  if (!confirm('Supprimer cette note de frais ?')) return;
+  await action(function () { return Api.deleteNote(id); }, 'Note supprimée');
+  await rechargerDonnees();
+  naviguer('notes');
 }
 
 /** Rembourse d'un coup toutes les notes validées d'un bénévole :
@@ -815,26 +881,31 @@ async function traiterNote(id, statut) {
   naviguer('notes');
 }
 
-function editerNote() {
+function editerNote(id) {
   var taux = nombre(etat.config.tauxKm) || 0.35;
+  var n = id ? etat.notes.find(function (x) { return x.id === id; }) : null;
+  if (id && !n) return;
+  var estKmInitial = n ? n.type === 'km' : false;
 
   var benevoles = (etat.benevoles || []).slice();
-  if (!benevoles.some(function (n) { return n.toLowerCase() === etat.prenom.toLowerCase(); })) {
-    benevoles.unshift(etat.prenom);
+  var benevoleInitial = n ? n.benevole : etat.prenom;
+  if (!benevoles.some(function (b) { return b.toLowerCase() === benevoleInitial.toLowerCase(); })) {
+    benevoles.unshift(benevoleInitial);
   }
-  var optionsBenevoles = benevoles.map(function (n) {
-    var moi = n.toLowerCase() === etat.prenom.toLowerCase();
-    return '<option' + (moi ? ' selected' : '') + '>' + echap(n) + '</option>';
+  var optionsBenevoles = benevoles.map(function (b) {
+    var choisi = b.toLowerCase() === benevoleInitial.toLowerCase();
+    return '<option' + (choisi ? ' selected' : '') + '>' + echap(b) + '</option>';
   }).join('') + '<option value="__nouveau__">➕ Nouveau bénévole...</option>';
 
   ouvrirModale(
-    '<h3>Nouvelle note de frais</h3>' +
+    '<h3>' + (n ? 'Modifier la note de frais' : 'Nouvelle note de frais') + '</h3>' +
+    (n && n.statut === 'refusée' ? '<p class="erreur">Note refusée' + (n.commentaire ? ' : ' + echap(n.commentaire) : '') + ' — corrige-la, elle sera re-soumise.</p>' : '') +
     '<form id="form-note">' +
     '<div class="grille-form">' +
     champ('Type de note *', '<select id="nf-type">' +
-      '<option value="simple">Dépense simple (achat, repas...)</option>' +
-      '<option value="km">Frais kilométriques (véhicule)</option></select>') +
-    champ('Date de la dépense *', '<input id="nf-date" type="date" required value="' + aujourdhui() + '">') +
+      '<option value="simple"' + (!estKmInitial ? ' selected' : '') + '>Dépense simple (achat, repas...)</option>' +
+      '<option value="km"' + (estKmInitial ? ' selected' : '') + '>Frais kilométriques (véhicule)</option></select>') +
+    champ('Date de la dépense *', '<input id="nf-date" type="date" required value="' + echap(n ? n.date : aujourdhui()) + '">') +
     champ('Bénévole concerné *', '<select id="nf-benevole">' + optionsBenevoles + '</select>') +
     '<div class="champ cache" id="nf-nouveau-champ"><label>Nom du nouveau bénévole *</label>' +
     '<input id="nf-nouveau" placeholder="ex : Camille"></div>' +
@@ -842,17 +913,19 @@ function editerNote() {
 
     // — Dépense simple —
     '<div id="nf-section-simple"><div class="grille-form">' +
-    champ('Catégorie', '<select id="nf-categorie">' + CATEGORIES_NOTES.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>') +
-    champ('Montant (€) *', '<input id="nf-montant" inputmode="decimal" placeholder="ex : 34,50">') +
+    champ('Catégorie', '<select id="nf-categorie">' + CATEGORIES_NOTES.map(function (c) {
+      return '<option' + (n && !estKmInitial && n.categorie === c ? ' selected' : '') + '>' + c + '</option>';
+    }).join('') + '</select>') +
+    champ('Montant (€) *', '<input id="nf-montant" inputmode="decimal" placeholder="ex : 34,50" value="' + (n && !estKmInitial ? echap(n.montant) : '') + '">') +
     '</div></div>' +
 
     // — Frais kilométriques —
     '<div id="nf-section-km" class="cache">' +
     '<div class="grille-form">' +
-    champ('Départ *', '<input id="nf-depart" placeholder="ex : Annecy">') +
-    champ('Arrivée *', '<input id="nf-arrivee" placeholder="ex : Passy">') +
-    champ('Nombre de kilomètres *', '<input id="nf-nbkm" inputmode="decimal" placeholder="ex : 120 (aller-retour compris)">') +
-    champ('Péages (€)', '<input id="nf-peages" inputmode="decimal" placeholder="0">') +
+    champ('Départ *', '<input id="nf-depart" placeholder="ex : Annecy" value="' + echap(n ? n.depart : '') + '">') +
+    champ('Arrivée *', '<input id="nf-arrivee" placeholder="ex : Passy" value="' + echap(n ? n.arrivee : '') + '">') +
+    champ('Nombre de kilomètres *', '<input id="nf-nbkm" inputmode="decimal" placeholder="ex : 120 (aller-retour compris)" value="' + echap(n ? n.km : '') + '">') +
+    champ('Péages (€)', '<input id="nf-peages" inputmode="decimal" placeholder="0" value="' + (n && nombre(n.peages) ? echap(n.peages) : '') + '">') +
     champ('Indemnité kilométrique (' + taux.toLocaleString('fr-FR') + ' €/km)', '<input id="nf-usure" disabled value="0,00 €">') +
     '</div>' +
     '<p class="texte-doux" style="font-size:12.5px">L\'indemnité kilométrique couvre l\'essence et l\'usure du véhicule — ne pas ajouter le plein à part.</p>' +
@@ -860,12 +933,13 @@ function editerNote() {
     '</div>' +
 
     '<div class="grille-form">' +
-    champ('Description', '<input id="nf-description" placeholder="ex : animation highline fête du sport">', true) +
-    champ('Justificatif (photo ou PDF)', '<input id="nf-fichier" type="file" accept="image/*,.pdf" capture="environment">') +
+    champ('Description', '<input id="nf-description" placeholder="ex : animation highline fête du sport" value="' + echap(n ? n.description : '') + '">', true) +
+    champ('Justificatif (photo ou PDF)' + (n && n.justificatifUrl ? ' — <a href="' + echap(n.justificatifUrl) + '" target="_blank" rel="noopener">📎 actuel</a>, choisir un fichier pour le remplacer' : ''),
+      '<input id="nf-fichier" type="file" accept="image/*,.pdf" capture="environment">') +
     '</div>' +
     '<p class="texte-doux" style="font-size:12.5px">📷 Les photos sont compressées automatiquement avant envoi. Pour un trajet avec péage, joins si possible le ticket.</p>' +
     '<div class="barre-actions">' +
-    '<button type="submit" class="btn btn-primaire">📤 Soumettre</button>' +
+    '<button type="submit" class="btn btn-primaire">' + (n ? '💾 Enregistrer' : '📤 Soumettre') + '</button>' +
     '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
     '</div></form>'
   );
@@ -890,6 +964,11 @@ function editerNote() {
   ['nf-nbkm', 'nf-peages'].forEach(function (idInput) {
     $('#' + idInput).addEventListener('input', recalculerKm);
   });
+  if (estKmInitial) {
+    $('#nf-section-simple').classList.add('cache');
+    $('#nf-section-km').classList.remove('cache');
+    recalculerKm();
+  }
 
   $('#form-note').addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -902,16 +981,16 @@ function editerNote() {
     }
 
     var note = {
-      id: '',
+      id: n ? n.id : '',
       date: $('#nf-date').value,
       benevole: benevole,
-      saisiePar: etat.prenom,
+      saisiePar: n ? (n.saisiePar || etat.prenom) : etat.prenom,
       type: estKm ? 'km' : 'simple',
       description: $('#nf-description').value.trim(),
       categorie: '',
       depart: '', arrivee: '', km: '', essence: '', peages: '', indemniteKm: '',
       montant: 0,
-      justificatifUrl: '',
+      justificatifUrl: n ? (n.justificatifUrl || '') : '',
       statut: 'soumise',
       commentaire: ''
     };
@@ -954,7 +1033,7 @@ function editerNote() {
       }
     }
 
-    await action(function () { return Api.saveNote(note, base64, nomFichier); }, 'Note de frais soumise ✔');
+    await action(function () { return Api.saveNote(note, base64, nomFichier); }, n ? 'Note modifiée et re-soumise ✔' : 'Note de frais soumise ✔');
     fermerModale();
     await rechargerDonnees();
     naviguer('notes');

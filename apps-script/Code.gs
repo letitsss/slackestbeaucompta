@@ -148,7 +148,8 @@ function traiter(req) {
     case 'saveFacture':   return saveFacture(req.facture, req.prenom);
     case 'deleteFacture': return supprimerLigne(ONGLETS.FACTURES, req.id);
     case 'marquerPayee':  return marquerPayee(req.id, req.datePaiement);
-    case 'saveNote':      return saveNote(req.note, req.justificatifBase64, req.justificatifNom, config);
+    case 'saveNote':      return saveNote(req.note, req.justificatifBase64, req.justificatifNom, config, role, req.prenom);
+    case 'deleteNote':    return deleteNote(req.id, role, req.prenom);
     case 'traiterNote':   return traiterNote(req.id, req.statut, req.commentaire);
     case 'saveCompta':    return saveCompta(req.ligne, req.prenom);
     case 'deleteCompta':  return supprimerLigne(ONGLETS.COMPTA, req.id);
@@ -346,7 +347,23 @@ function marquerPayee(id, datePaiement) {
 /* Notes de frais                                                      */
 /* ------------------------------------------------------------------ */
 
-function saveNote(note, justificatifBase64, justificatifNom, config) {
+function saveNote(note, justificatifBase64, justificatifNom, config, role, prenom) {
+  if (note.id) {
+    var existante = trouver(ONGLETS.NOTES, note.id);
+    if (existante && role !== 'tresorier') {
+      if (!estProprietaireNote(existante, prenom)) {
+        return { ok: false, erreur: 'Cette note ne t\'appartient pas' };
+      }
+      if (existante.statut !== 'soumise' && existante.statut !== 'refusée') {
+        return { ok: false, erreur: 'Cette note a déjà été traitée par le trésorier, elle ne peut plus être modifiée' };
+      }
+      note.statut = 'soumise';
+      note.commentaire = '';
+    }
+    if (existante && !justificatifBase64 && !note.justificatifUrl) {
+      note.justificatifUrl = existante.justificatifUrl;
+    }
+  }
   if (!note.id) note.id = Utilities.getUuid();
   if (!note.statut) note.statut = 'soumise';
   ajouterBenevole(note.benevole);
@@ -366,6 +383,25 @@ function saveNote(note, justificatifBase64, justificatifNom, config) {
 
   upsert(ONGLETS.NOTES, note);
   return { ok: true, note: note };
+}
+
+function estProprietaireNote(note, prenom) {
+  var moi = String(prenom || '').toLowerCase();
+  return String(note.benevole).toLowerCase() === moi || String(note.saisiePar).toLowerCase() === moi;
+}
+
+/** Suppression : uniquement une note pas encore traitée (soumise/refusée),
+ *  par son bénévole ou le trésorier. */
+function deleteNote(id, role, prenom) {
+  var note = trouver(ONGLETS.NOTES, id);
+  if (!note) return { ok: false, erreur: 'Note introuvable' };
+  if (note.statut !== 'soumise' && note.statut !== 'refusée') {
+    return { ok: false, erreur: 'Une note validée ou remboursée ne peut pas être supprimée' };
+  }
+  if (role !== 'tresorier' && !estProprietaireNote(note, prenom)) {
+    return { ok: false, erreur: 'Cette note ne t\'appartient pas' };
+  }
+  return supprimerLigne(ONGLETS.NOTES, id);
 }
 
 function dossierJustificatifs(config) {

@@ -73,6 +73,7 @@ var Api = (function () {
     traiterNote: function (id, statut, commentaire) {
       return appeler('traiterNote', { id: id, statut: statut, commentaire: commentaire });
     },
+    deleteNote: function (id) { return appeler('deleteNote', { id: id }); },
 
     saveCompta: function (ligne) { return appeler('saveCompta', { ligne: ligne }); },
     deleteCompta: function (id) { return appeler('deleteCompta', { id: id }); },
