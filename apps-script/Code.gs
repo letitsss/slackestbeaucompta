@@ -12,6 +12,10 @@
  * 3. Copier l'URL du déploiement dans js/config.js du site.
  */
 
+/** Version du script — visible en ouvrant l'URL /exec dans un navigateur,
+ *  permet de vérifier que la dernière version est bien déployée. */
+var VERSION = '2026-08-26 notes modifiables';
+
 var ONGLETS = {
   CONFIG: 'Config',
   DEVIS: 'Devis',
@@ -98,7 +102,7 @@ function initialiser() {
 /* ------------------------------------------------------------------ */
 
 function doGet() {
-  return reponse({ ok: true, message: 'API SlackEstBeau opérationnelle' });
+  return reponse({ ok: true, message: 'API SlackEstBeau opérationnelle', version: VERSION });
 }
 
 function doPost(e) {
