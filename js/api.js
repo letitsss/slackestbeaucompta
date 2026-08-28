@@ -31,16 +31,32 @@ var Api = (function () {
       prenom: s.prenom || ''
     }, params || {});
 
-    var res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(corps),
-      redirect: 'follow'
-    });
-    if (!res.ok) throw new Error('Erreur réseau (' + res.status + ')');
-    var data = await res.json();
-    if (!data.ok) throw new Error(data.erreur || 'Erreur inconnue');
-    return data;
+    // Google Apps Script renvoie parfois un 404 ou une page HTML passagère
+    // (surtout juste après un déploiement) : on réessaie avant d'abandonner.
+    var derniereErreur;
+    for (var essai = 0; essai < 4; essai++) {
+      if (essai > 0) await new Promise(function (r) { setTimeout(r, 800 * Math.pow(2, essai - 1)); });
+      try {
+        var res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(corps),
+          redirect: 'follow'
+        });
+        if (!res.ok) throw new Error('Erreur réseau (' + res.status + ')');
+        var texte = await res.text();
+        var data;
+        try { data = JSON.parse(texte); }
+        catch (e) { throw new Error('Réponse inattendue du serveur (page Google au lieu des données)'); }
+        if (!data.ok) throw new Error(data.erreur || 'Erreur inconnue');
+        return data;
+      } catch (e) {
+        derniereErreur = e;
+        // Une vraie erreur métier (code invalide, non autorisé...) ne se réessaie pas
+        if (!/Erreur réseau|Réponse inattendue|Failed to fetch|NetworkError|Load failed/i.test(e.message)) throw e;
+      }
+    }
+    throw new Error(derniereErreur.message + ' — le serveur Google n\'a pas répondu après 4 essais, réessaie dans une minute');
   }
 
   return {
