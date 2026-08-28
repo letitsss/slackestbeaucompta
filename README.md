@@ -1,5 +1,7 @@
 # 📒 Gestion asso — devis, factures, compta & notes de frais
 
+> 🚀 **Installer l'outil dans votre association** : [guide d'installation pas à pas](application%20publique/README.md) · [kit à télécharger](https://github.com/letitsss/slackestbeaucompta/releases) · [texte de présentation](application%20publique/TEXTE-DE-PUBLICATION.md)
+
 Outil de gestion complet pour associations loi 1901, **gratuit et sans serveur** :
 tout tourne dans un Google Sheet de l'association, l'interface est servie par Google Apps Script.
 
