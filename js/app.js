@@ -133,20 +133,55 @@ async function demarrer() {
   }
 }
 
+function appliquerDonnees(data) {
+  etat.role = data.role;
+  etat.config = data.config || {};
+  etat.devis = data.devis || [];
+  etat.factures = data.factures || [];
+  etat.notes = data.notes || [];
+  etat.compta = data.compta || [];
+  etat.benevoles = data.benevoles || [];
+}
+
 async function rechargerDonnees() {
   chargement(true);
   try {
-    var data = await Api.getData();
-    etat.role = data.role;
-    etat.config = data.config || {};
-    etat.devis = data.devis || [];
-    etat.factures = data.factures || [];
-    etat.notes = data.notes || [];
-    etat.compta = data.compta || [];
-    etat.benevoles = data.benevoles || [];
+    appliquerDonnees(await Api.getData());
   } finally {
     chargement(false);
   }
+}
+
+/* Après une action, l'écran est mis à jour immédiatement avec la réponse du
+   serveur ; le rechargement complet se fait ensuite en arrière-plan, sans
+   bloquer, et ne redessine la vue que si quelque chose a réellement changé. */
+var jetonRafraichissement = 0;
+
+function empreinteDonnees() {
+  return JSON.stringify([etat.devis, etat.factures, etat.notes, etat.compta, etat.benevoles]);
+}
+
+function rafraichirEnFond() {
+  var jeton = ++jetonRafraichissement;
+  var vueAvant = etat.vue;
+  var avant = empreinteDonnees();
+  Api.getData().then(function (data) {
+    if (jeton !== jetonRafraichissement) return;
+    appliquerDonnees(data);
+    var modaleOuverte = !$('#modale-fond').classList.contains('cache');
+    if (etat.vue === vueAvant && !modaleOuverte && empreinteDonnees() !== avant) naviguer(etat.vue, true);
+  }).catch(function () { /* silencieux : la prochaine action rechargera */ });
+}
+
+function majLocale(liste, obj) {
+  if (!obj || !obj.id) return;
+  var i = liste.findIndex(function (x) { return x.id === obj.id; });
+  if (i === -1) liste.push(obj); else liste[i] = obj;
+}
+
+function retirerLocal(liste, id) {
+  var i = liste.findIndex(function (x) { return x.id === id; });
+  if (i !== -1) liste.splice(i, 1);
 }
 
 function afficherApp() {
@@ -210,7 +245,7 @@ function construireNav() {
   });
 }
 
-function naviguer(vue) {
+function naviguer(vue, silencieux) {
   etat.vue = vue;
   $('#nav').querySelectorAll('a').forEach(function (a) {
     a.classList.toggle('actif', a.dataset.vue === vue);
@@ -225,7 +260,7 @@ function naviguer(vue) {
     parametres: vueParametres
   };
   (vues[vue] || vueAccueil)();
-  window.scrollTo(0, 0);
+  if (!silencieux) window.scrollTo(0, 0);
 }
 
 /* ---------------------------------------------------------------
@@ -343,10 +378,11 @@ function editerDevis(id) {
       conditions: $('#dv-conditions').value.trim(),
       factureNumero: d ? d.factureNumero : ''
     };
-    await action(function () { return Api.saveDevis(devis); }, 'Devis enregistré ✔');
+    var res = await action(function () { return Api.saveDevis(devis); }, 'Devis enregistré ✔');
     fermerModale();
-    await rechargerDonnees();
+    majLocale(etat.devis, res.devis);
     naviguer('devis');
+    rafraichirEnFond();
   });
 }
 
@@ -488,25 +524,28 @@ function editerNumeroDate(type, id) {
       chargement(false);
     }
     fermerModale();
-    await rechargerDonnees();
     naviguer(estFacture ? 'factures' : 'devis');
+    rafraichirEnFond();
   });
 }
 
 async function convertirDevis(id) {
   if (!confirm('Convertir ce devis en facture ? La numérotation de facture sera attribuée.')) return;
-  await action(function () { return Api.convertirDevis(id); }, 'Facture créée ✔');
+  var res = await action(function () { return Api.convertirDevis(id); }, 'Facture créée ✔');
   fermerModale();
-  await rechargerDonnees();
+  majLocale(etat.factures, res.facture);
+  majLocale(etat.devis, res.devis);
   naviguer('factures');
+  rafraichirEnFond();
 }
 
 async function supprimerDevis(id) {
   if (!confirm('Supprimer ce devis ?')) return;
   await action(function () { return Api.deleteDevis(id); }, 'Devis supprimé');
   fermerModale();
-  await rechargerDonnees();
+  retirerLocal(etat.devis, id);
   naviguer('devis');
+  rafraichirEnFond();
 }
 
 /* ---------------------------------------------------------------
@@ -566,18 +605,20 @@ function detailFacture(id) {
 
 async function marquerPayee(id) {
   if (!confirm('Marquer cette facture comme payée ? Une recette sera ajoutée automatiquement à la compta.')) return;
-  await action(function () { return Api.marquerPayee(id, aujourdhui()); }, 'Facture payée — recette enregistrée ✔');
+  var res = await action(function () { return Api.marquerPayee(id, aujourdhui()); }, 'Facture payée — recette enregistrée ✔');
   fermerModale();
-  await rechargerDonnees();
+  majLocale(etat.factures, res.facture);
   naviguer('factures');
+  rafraichirEnFond();
 }
 
 async function supprimerFacture(id) {
   if (!confirm('Supprimer cette facture ? Attention : cela crée un trou dans la numérotation.')) return;
   await action(function () { return Api.deleteFacture(id); }, 'Facture supprimée');
   fermerModale();
-  await rechargerDonnees();
+  retirerLocal(etat.factures, id);
   naviguer('factures');
+  rafraichirEnFond();
 }
 
 /* ---------------------------------------------------------------
@@ -883,8 +924,9 @@ function actionsNote(n) {
 async function supprimerNote(id) {
   if (!confirm('Supprimer cette note de frais ?')) return;
   await action(function () { return Api.deleteNote(id); }, 'Note supprimée');
-  await rechargerDonnees();
+  retirerLocal(etat.notes, id);
   naviguer('notes');
+  rafraichirEnFond();
 }
 
 /** Rembourse d'un coup toutes les notes validées d'un bénévole :
@@ -906,7 +948,7 @@ async function rembourserGroupe(benevole) {
       notes[i].statut = 'remboursée';
       await Api.saveNote(notes[i]);
     }
-    await Api.saveCompta({
+    var resCompta = await Api.saveCompta({
       id: '',
       date: aujourdhui(),
       type: 'dépense',
@@ -920,14 +962,15 @@ async function rembourserGroupe(benevole) {
       pointee: '',
       auteur: etat.prenom
     });
+    majLocale(etat.compta, resCompta.ligne);
     toast(benevole + ' remboursé(e) : ' + euros(total) + ' — dépense créée en compta ✔');
   } catch (e) {
     toast(e.message, true);
   } finally {
     chargement(false);
   }
-  await rechargerDonnees();
   naviguer('notes');
+  rafraichirEnFond();
 }
 
 async function traiterNote(id, statut) {
@@ -936,9 +979,10 @@ async function traiterNote(id, statut) {
     commentaire = prompt('Motif du refus (visible par le bénévole) :') || '';
   }
   if (statut === 'remboursée' && !confirm('Confirmer le remboursement ? La dépense sera ajoutée à la compta.')) return;
-  await action(function () { return Api.traiterNote(id, statut, commentaire); }, 'Note ' + statut + ' ✔');
-  await rechargerDonnees();
+  var res = await action(function () { return Api.traiterNote(id, statut, commentaire); }, 'Note ' + statut + ' ✔');
+  majLocale(etat.notes, res.note);
   naviguer('notes');
+  rafraichirEnFond();
 }
 
 function editerNote(id) {
@@ -1093,10 +1137,11 @@ function editerNote(id) {
       }
     }
 
-    await action(function () { return Api.saveNote(note, base64, nomFichier); }, n ? 'Note modifiée et re-soumise ✔' : 'Note de frais soumise ✔');
+    var res = await action(function () { return Api.saveNote(note, base64, nomFichier); }, n ? 'Note modifiée et re-soumise ✔' : 'Note de frais soumise ✔');
     fermerModale();
-    await rechargerDonnees();
+    majLocale(etat.notes, res.note);
     naviguer('notes');
+    rafraichirEnFond();
   });
 }
 
@@ -1166,8 +1211,13 @@ function anneesDisponibles() {
   return Object.keys(annees).sort().reverse();
 }
 
+var anneeCompta = '', compteCompta = '';
+
 function vueCompta(anneeChoisie, compteChoisi) {
-  var annee = anneeChoisie || String(new Date().getFullYear());
+  var annee = anneeChoisie || anneeCompta || String(new Date().getFullYear());
+  if (compteChoisi === undefined) compteChoisi = compteCompta;
+  anneeCompta = annee;
+  compteCompta = compteChoisi || '';
   var lignesAnnee = etat.compta
     .filter(function (l) { return String(l.date || '').slice(0, 4) === annee; });
   var lignes = lignesAnnee
@@ -1322,18 +1372,20 @@ function editerCompta() {
       pointee: '',
       auteur: etat.prenom
     };
-    await action(function () { return Api.saveCompta(ligne); }, 'Écriture enregistrée ✔');
+    var res = await action(function () { return Api.saveCompta(ligne); }, 'Écriture enregistrée ✔');
     fermerModale();
-    await rechargerDonnees();
+    majLocale(etat.compta, res.ligne);
     naviguer('compta');
+    rafraichirEnFond();
   });
 }
 
 async function supprimerCompta(id, annee) {
   if (!confirm('Supprimer cette écriture ?')) return;
   await action(function () { return Api.deleteCompta(id); }, 'Écriture supprimée');
-  await rechargerDonnees();
+  retirerLocal(etat.compta, id);
   vueCompta(annee);
+  rafraichirEnFond();
 }
 
 function exporterComptaCSV(annee) {
@@ -1840,8 +1892,11 @@ function importerReleveBanque() {
    Vue : bilan (trésorier)
    --------------------------------------------------------------- */
 
+var anneeBilan = '';
+
 function vueBilan(anneeChoisie) {
-  var annee = anneeChoisie || String(new Date().getFullYear());
+  var annee = anneeChoisie || anneeBilan || String(new Date().getFullYear());
+  anneeBilan = annee;
   var lignes = etat.compta.filter(function (l) { return String(l.date || '').slice(0, 4) === annee; });
 
   function totauxParCategorie(type) {
