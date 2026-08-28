@@ -1,35 +1,58 @@
 /* Client API — communique avec le backend Apps Script.
- * Astuce : Content-Type text/plain évite le préflight CORS
- * que Apps Script ne sait pas gérer. */
+ *
+ * Deux modes, détectés automatiquement :
+ *  - « tout Google » : l'interface est servie par Apps Script lui-même,
+ *    les appels passent par google.script.run (pas de CORS, pas d'URL) ;
+ *  - « site séparé » (GitHub Pages...) : appels HTTP vers API_URL
+ *    (Content-Type text/plain pour éviter le préflight CORS que
+ *    Apps Script ne sait pas gérer). */
 
 var Api = (function () {
 
+  var MODE_GOOGLE = (typeof google !== 'undefined') && !!google.script && !!google.script.run;
+  var memoire = null; // secours si le stockage local est bloqué (iframe)
+
   function session() {
     try {
-      return JSON.parse(localStorage.getItem('seb-session')) || null;
+      return JSON.parse(localStorage.getItem('seb-session')) || memoire;
     } catch (e) {
-      return null;
+      return memoire;
     }
   }
 
   function sauverSession(s) {
-    localStorage.setItem('seb-session', JSON.stringify(s));
+    memoire = s;
+    try { localStorage.setItem('seb-session', JSON.stringify(s)); } catch (e) { /* stockage bloqué */ }
   }
 
   function effacerSession() {
-    localStorage.removeItem('seb-session');
+    memoire = null;
+    try { localStorage.removeItem('seb-session'); } catch (e) { /* stockage bloqué */ }
   }
 
   async function appeler(action, params) {
-    if (!API_URL || API_URL.indexOf('http') !== 0) {
-      throw new Error("L'URL de l'API n'est pas configurée : édite js/config.js");
-    }
     var s = session() || {};
     var corps = Object.assign({
       action: action,
       code: s.code || '',
       prenom: s.prenom || ''
     }, params || {});
+
+    if (MODE_GOOGLE) {
+      var texteG = await new Promise(function (resoudre, rejeter) {
+        google.script.run
+          .withSuccessHandler(resoudre)
+          .withFailureHandler(function (e) { rejeter(new Error(e && e.message ? e.message : String(e))); })
+          .api(JSON.stringify(corps));
+      });
+      var dataG = JSON.parse(texteG);
+      if (!dataG.ok) throw new Error(dataG.erreur || 'Erreur inconnue');
+      return dataG;
+    }
+
+    if (typeof API_URL === 'undefined' || !API_URL || API_URL.indexOf('http') !== 0) {
+      throw new Error("L'URL de l'API n'est pas configurée : édite js/config.js");
+    }
 
     // Google Apps Script renvoie parfois un 404 ou une page HTML passagère
     // (surtout juste après un déploiement) : on réessaie avant d'abandonner.
@@ -60,10 +83,12 @@ var Api = (function () {
   }
 
   return {
+    modeGoogle: MODE_GOOGLE,
     session: session,
     sauverSession: sauverSession,
     effacerSession: effacerSession,
 
+    infosPubliques: function () { return appeler('infosPubliques'); },
     login: function (code, prenom) {
       return appeler('login', { code: code, prenom: prenom });
     },

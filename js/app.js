@@ -1,6 +1,10 @@
 /* ================================================================
-   S'Lac'K Est Beau — application devis / factures / compta
+   Gestion asso — devis / factures / compta / notes de frais
+   Logiciel libre (MIT) créé par S'Lac'K Est Beau — slackestbeau.org
    ================================================================ */
+
+var VERSION_APP = '2.0.0';
+var URL_PROJET = 'https://github.com/letitsss/slackestbeaucompta';
 
 var etat = {
   role: null,
@@ -14,10 +18,78 @@ var etat = {
   vue: 'accueil'
 };
 
-var CATEGORIES_RECETTES = ['Prestations', 'Adhésions', 'Goodies', 'Subventions', 'Dons', 'Buvette / événements', 'Autre recette'];
-var MODES_PAIEMENT = ['Virement', 'CB', 'Espèces', 'Chèque', 'HelloAsso', 'Prélèvement'];
-var CATEGORIES_DEPENSES = ['Matériel', 'Déplacements', 'Notes de frais', 'Assurance', 'Communication', 'Frais bancaires', 'Location / salle', 'Autre dépense'];
-var CATEGORIES_NOTES = ['Repas', 'Matériel', 'Hébergement', 'Autre'];
+/* Listes personnalisables dans Paramètres (valeurs par défaut ci-dessous) */
+var LISTES_DEFAUT = {
+  categoriesRecettes: 'Prestations,Adhésions,Goodies,Subventions,Dons,Buvette / événements,Autre recette',
+  categoriesDepenses: 'Matériel,Déplacements,Notes de frais,Assurance,Communication,Frais bancaires,Location / salle,Autre dépense',
+  categoriesNotes: 'Repas,Matériel,Hébergement,Autre',
+  modesPaiement: 'Virement,CB,Espèces,Chèque,HelloAsso,Prélèvement'
+};
+
+function listeConfig(cle) {
+  return String(etat.config[cle] || LISTES_DEFAUT[cle] || '')
+    .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+}
+function categoriesRecettes() { return listeConfig('categoriesRecettes'); }
+function categoriesDepenses() { return listeConfig('categoriesDepenses'); }
+function categoriesNotes() { return listeConfig('categoriesNotes'); }
+function modesPaiement() { return listeConfig('modesPaiement'); }
+function tvaActive() { return String(etat.config.tvaActive || '').toLowerCase() === 'oui'; }
+
+/* ---------------------------------------------------------------
+   Thème, logo et identité (personnalisables dans Paramètres)
+   --------------------------------------------------------------- */
+
+/** Éclaircit (facteur > 0, vers le blanc) ou assombrit (facteur < 0) une couleur hex. */
+function ajusterCouleur(hex, facteur) {
+  var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return hex;
+  var n = parseInt(m[1], 16);
+  var cible = facteur > 0 ? 255 : 0, f = Math.abs(facteur);
+  function mix(c) { return Math.round(c + (cible - c) * f); }
+  return '#' + [mix(n >> 16 & 255), mix(n >> 8 & 255), mix(n & 255)]
+    .map(function (v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+}
+
+function appliquerTheme(cfg) {
+  var st = document.documentElement.style;
+  if (cfg.couleurPrimaire) {
+    st.setProperty('--primaire', cfg.couleurPrimaire);
+    st.setProperty('--primaire-fonce', ajusterCouleur(cfg.couleurPrimaire, -0.25));
+    st.setProperty('--primaire-clair', ajusterCouleur(cfg.couleurPrimaire, 0.88));
+  }
+  if (cfg.couleurAccent) {
+    st.setProperty('--accent', cfg.couleurAccent);
+    st.setProperty('--accent-fonce', ajusterCouleur(cfg.couleurAccent, -0.15));
+  }
+}
+
+function logoSrc(cfg) {
+  cfg = cfg || etat.config;
+  if (cfg.logoData) return cfg.logoData;
+  return cfg.logoUrl ? resoudreUrl(cfg.logoUrl) : '';
+}
+
+/** Applique nom, logo et couleurs à l'écran de connexion et au bandeau. */
+function appliquerMarque(infos) {
+  infos = infos || {};
+  var nom = infos.nomAsso || 'Gestion asso';
+  var logo = logoSrc(infos);
+  document.title = nom + ' — Devis, factures & compta';
+  var titre = $('#titre-app');
+  if (titre) titre.innerHTML = (logo ? '<img class="logo-topbar" src="' + echap(logo) + '" alt=""> ' : '') + echap(nom);
+  var loginTitre = $('#login-titre');
+  if (loginTitre) loginTitre.textContent = nom;
+  var loginLogo = $('#login-logo');
+  if (loginLogo) loginLogo.innerHTML = logo ? '<img src="' + echap(logo) + '" alt="">' : '';
+  var loginVersion = $('#login-version');
+  if (loginVersion) loginVersion.textContent = VERSION_APP;
+  appliquerTheme(infos);
+}
+
+function premiereInstallation() {
+  return !etat.config.nomAsso || etat.config.codeTresorier === 'CHANGEMOI-TRESO';
+}
 
 /* ---------------------------------------------------------------
    Utilitaires
@@ -115,6 +187,8 @@ $('#modale-fond') && $('#modale-fond').addEventListener('click', function (e) {
    --------------------------------------------------------------- */
 
 async function demarrer() {
+  appliquerMarque({});
+  Api.infosPubliques().then(appliquerMarque).catch(function () { /* pas bloquant */ });
   var s = Api.session();
   if (!s) {
     $('#ecran-login').classList.remove('cache');
@@ -134,6 +208,7 @@ async function demarrer() {
 }
 
 function appliquerDonnees(data) {
+  etat.versionServeur = data.version || '';
   etat.role = data.role;
   etat.config = data.config || {};
   etat.devis = data.devis || [];
@@ -188,8 +263,10 @@ function afficherApp() {
   $('#ecran-login').classList.add('cache');
   $('#app').classList.remove('cache');
   $('#badge-user').textContent = etat.prenom + ' · ' + (etat.role === 'tresorier' ? 'Trésorier' : 'Bénévole');
+  appliquerMarque(etat.config);
   construireNav();
-  naviguer(etat.vue);
+  // Première installation : le trésorier est guidé vers les Paramètres
+  naviguer(etat.role === 'tresorier' && premiereInstallation() ? 'parametres' : etat.vue);
 }
 
 $('#form-login').addEventListener('submit', async function (e) {
@@ -343,7 +420,8 @@ function editerDevis(id) {
     champ('Remise exceptionnelle (€)', '<input id="dv-remise" inputmode="decimal" value="' + echap(d && nombre(d.remise) ? d.remise : '') + '" placeholder="ex : 250">') +
     champ('Conditions de paiement (sur le devis)', '<textarea id="dv-conditions" rows="2">' + echap(d ? d.conditions : conditionsDefaut) + '</textarea>') +
     '</div>' +
-    '<div class="total-general"><span class="texte-doux" style="font-size:14px">Sous-total : <span id="dv-soustotal">0,00 €</span> · </span>Total : <span id="dv-total">0,00 €</span> TTC</div>' +
+    '<div class="total-general"><span class="texte-doux" style="font-size:14px">Sous-total' + (tvaActive() ? ' HT' : '') + ' : <span id="dv-soustotal">0,00 €</span> · ' +
+    '<span id="dv-tva-wrap"' + (tvaActive() ? '' : ' class="cache"') + '>TVA : <span id="dv-tva">0,00 €</span> · </span></span>Total : <span id="dv-total">0,00 €</span> TTC</div>' +
     '<div class="barre-actions">' +
     '<button type="submit" class="btn btn-primaire">💾 Enregistrer</button>' +
     '<button type="button" class="btn" onclick="fermerModale()">Annuler</button>' +
@@ -360,6 +438,7 @@ function editerDevis(id) {
     e.preventDefault();
     var lignesSaisies = lireLignesDevis();
     var remise = nombre($('#dv-remise').value);
+    var totaux = totauxDocument(lignesSaisies, remise);
     var devis = {
       id: d ? d.id : '',
       numero: d ? d.numero : '',
@@ -373,7 +452,9 @@ function editerDevis(id) {
       lignes: JSON.stringify(lignesSaisies),
       details: $('#dv-details').value.trim(),
       remise: remise,
-      total: totalLignes(lignesSaisies) - remise,
+      totalHT: totaux.ht - totaux.remise,
+      totalTVA: totaux.tva,
+      total: totaux.ttc,
       statut: $('#dv-statut').value,
       conditions: $('#dv-conditions').value.trim(),
       factureNumero: d ? d.factureNumero : ''
@@ -400,12 +481,15 @@ function champ(label, inputHtml, pleineLargeur) {
 
 function ajouterLigneDevis(ligne) {
   ligne = ligne || { desc: '', qte: 1, pu: '' };
+  var avecTva = tvaActive();
+  var tauxLigne = ligne.tva !== undefined && ligne.tva !== '' ? ligne.tva : (etat.config.tauxTvaDefaut || '20');
   var div = document.createElement('div');
-  div.className = 'ligne-devis';
+  div.className = 'ligne-devis' + (avecTva ? ' avec-tva' : '');
   div.innerHTML =
     '<input class="ld-desc" placeholder="Description (ex : ½ journée initiation, 2 encadrants)" value="' + echap(ligne.desc) + '">' +
     '<input class="ld-qte" type="number" step="0.5" min="0" placeholder="Qté" value="' + echap(ligne.qte) + '">' +
-    '<input class="ld-pu" inputmode="decimal" placeholder="Prix unit. €" value="' + echap(ligne.pu) + '">' +
+    '<input class="ld-pu" inputmode="decimal" placeholder="' + (avecTva ? 'Prix unit. HT' : 'Prix unit. €') + '" value="' + echap(ligne.pu) + '">' +
+    (avecTva ? '<input class="ld-tva" inputmode="decimal" placeholder="TVA %" title="Taux de TVA (%)" value="' + echap(tauxLigne) + '">' : '') +
     '<span class="total-ligne">0,00 €</span>' +
     '<button type="button" class="btn btn-danger btn-petit" title="Supprimer">✕</button>';
   div.querySelector('button').addEventListener('click', function () {
@@ -419,11 +503,14 @@ function ajouterLigneDevis(ligne) {
 }
 
 function lireLignesDevis() {
+  var avecTva = tvaActive();
   return Array.from(document.querySelectorAll('#dv-lignes .ligne-devis')).map(function (div) {
+    var champTva = div.querySelector('.ld-tva');
     return {
       desc: div.querySelector('.ld-desc').value.trim(),
       qte: nombre(div.querySelector('.ld-qte').value),
-      pu: nombre(div.querySelector('.ld-pu').value)
+      pu: nombre(div.querySelector('.ld-pu').value),
+      tva: avecTva && champTva ? nombre(champTva.value) : 0
     };
   }).filter(function (l) { return l.desc || l.pu; });
 }
@@ -432,15 +519,29 @@ function totalLignes(lignes) {
   return lignes.reduce(function (s, l) { return s + nombre(l.qte) * nombre(l.pu); }, 0);
 }
 
+/** Totaux d'un devis/facture : HT, remise, TVA (proportionnelle à la remise), TTC. */
+function totauxDocument(lignes, remise) {
+  var ht = totalLignes(lignes);
+  remise = nombre(remise);
+  var tva = 0;
+  if (tvaActive() && ht > 0) {
+    var ratio = Math.max(0, (ht - remise) / ht);
+    lignes.forEach(function (l) { tva += nombre(l.qte) * nombre(l.pu) * ratio * nombre(l.tva) / 100; });
+  }
+  function r(x) { return Math.round(x * 100) / 100; }
+  return { ht: r(ht), remise: r(remise), tva: r(tva), ttc: r(ht - remise + tva) };
+}
+
 function recalculerTotalDevis() {
   document.querySelectorAll('#dv-lignes .ligne-devis').forEach(function (div) {
     var t = nombre(div.querySelector('.ld-qte').value) * nombre(div.querySelector('.ld-pu').value);
     div.querySelector('.total-ligne').textContent = euros(t);
   });
-  var sousTotal = totalLignes(lireLignesDevis());
   var remise = $('#dv-remise') ? nombre($('#dv-remise').value) : 0;
-  if ($('#dv-soustotal')) $('#dv-soustotal').textContent = euros(sousTotal);
-  if ($('#dv-total')) $('#dv-total').textContent = euros(sousTotal - remise);
+  var totaux = totauxDocument(lireLignesDevis(), remise);
+  if ($('#dv-soustotal')) $('#dv-soustotal').textContent = euros(totaux.ht);
+  if ($('#dv-tva')) $('#dv-tva').textContent = euros(totaux.tva);
+  if ($('#dv-total')) $('#dv-total').textContent = euros(totaux.ttc);
 }
 
 function detailDevis(id) {
@@ -458,6 +559,7 @@ function detailDevis(id) {
     '</tbody></table></div>' +
     (d.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(d.details) + '</p>' : '') +
     (nombre(d.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle : −' + euros(d.remise) + '</p>' : '') +
+    (nombre(d.totalTVA) ? '<p style="text-align:right;margin-top:4px" class="texte-doux">Total HT : ' + euros(d.totalHT) + ' · TVA : ' + euros(d.totalTVA) + '</p>' : '') +
     '<div class="total-general">Total : ' + euros(d.total) + ' TTC</div>' +
     (d.factureNumero ? '<p class="texte-doux">✅ Facturé — facture ' + echap(d.factureNumero) + '</p>' : '') +
     '<div class="barre-actions">' +
@@ -482,7 +584,7 @@ function editerNumeroDate(type, id) {
 
   ouvrirModale(
     '<h3>🔢 Corriger ' + (estFacture ? 'la facture' : 'le devis') + ' n°' + echap(doc.numero) + '</h3>' +
-    '<p class="texte-doux">Format des numéros : année + rang, ex : <strong>202603</strong>. Le numéro doit être unique. ' +
+    '<p class="texte-doux">Le numéro doit être unique (format libre, ex : <strong>202603</strong> ou <strong>F2026-003</strong>). ' +
     (estFacture ? 'Le devis d\'origine sera mis à jour automatiquement.' : 'La facture issue de ce devis sera mise à jour automatiquement.') + '</p>' +
     '<form id="form-numdate"><div class="grille-form">' +
     champ('Numéro *', '<input id="nd-numero" required value="' + echap(doc.numero) + '" inputmode="numeric">') +
@@ -498,7 +600,7 @@ function editerNumeroDate(type, id) {
     e.preventDefault();
     var nouveau = $('#nd-numero').value.trim();
     var ancien = String(doc.numero);
-    if (!/^\d{6,}$/.test(nouveau)) { toast('Numéro attendu au format année + rang, ex : 202603', true); return; }
+    if (!nouveau) { toast('Le numéro est obligatoire', true); return; }
     if (nouveau !== ancien && liste.some(function (x) { return String(x.numero) === nouveau; })) {
       toast('Le n°' + nouveau + ' existe déjà — change d\'abord l\'autre document', true); return;
     }
@@ -590,6 +692,7 @@ function detailFacture(id) {
     '</tbody></table></div>' +
     (f.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(f.details) + '</p>' : '') +
     (nombre(f.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle : −' + euros(f.remise) + '</p>' : '') +
+    (nombre(f.totalTVA) ? '<p style="text-align:right;margin-top:4px" class="texte-doux">Total HT : ' + euros(f.totalHT) + ' · TVA : ' + euros(f.totalTVA) + '</p>' : '') +
     '<div class="total-general">Total : ' + euros(f.total) + ' TTC</div>' +
     '<div class="barre-actions">' +
     '<button class="btn btn-primaire" onclick="imprimerDocument(\'facture\', \'' + f.id + '\')">🖨️ Imprimer / PDF</button>' +
@@ -631,15 +734,15 @@ function resoudreUrl(u) {
   try { return new URL(u, window.location.href).href; } catch (e) { return u; }
 }
 
-var STYLE_DOCUMENT = [
+var STYLE_DOCUMENT_MODELE = [
   '* { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }',
   'body { font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:#1c2733; font-size:13px;',
   '  max-width:190mm; margin:0 auto; padding:10mm 6mm; background:#fff; }',
   '@page { size:A4; margin:10mm 12mm; }',
   'p { line-height:1.5; }',
   '.doc-entete { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:12px; }',
-  '.doc-titre { font-size:46px; font-weight:800; color:#85aec9; line-height:1; margin-bottom:8px; }',
-  '.doc-badge { display:inline-block; border:1.5px solid #5c82a3; color:#3f5a70; border-radius:999px;',
+  '.doc-titre { font-size:46px; font-weight:800; color:%TITRE%; line-height:1; margin-bottom:8px; }',
+  '.doc-badge { display:inline-block; border:1.5px solid %BANDE%; color:%BADGE%; border-radius:999px;',
   '  padding:4px 14px; font-size:13px; font-weight:600; }',
   '.logo { max-height:90px; max-width:150px; object-fit:contain; }',
   '.doc-dates { border-top:1.5px solid #3d4a55; border-bottom:1.5px solid #3d4a55;',
@@ -648,18 +751,18 @@ var STYLE_DOCUMENT = [
   '.doc-client { text-align:right; }',
   '.doc-attention { font-weight:800; letter-spacing:0.03em; margin-bottom:2px; }',
   'table { width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:18px; table-layout:fixed; }',
-  'th { background:#5c82a3; color:#fff; text-align:center; padding:9px 10px; font-size:12px;',
-  '  letter-spacing:0.05em; border:1px solid #5c82a3; }',
+  'th { background:%BANDE%; color:#fff; text-align:center; padding:9px 10px; font-size:12px;',
+  '  letter-spacing:0.05em; border:1px solid %BANDE%; }',
   'th:first-child { width:46%; }',
-  'td { border:1px solid #9fb2c0; text-align:center; padding:12px 10px; vertical-align:middle; word-wrap:break-word; }',
-  '.doc-details { border:1px solid #9fb2c0; margin-bottom:18px; }',
-  '.doc-details-titre { background:#5c82a3; color:#fff; text-align:center; padding:7px 10px;',
+  'td { border:1px solid %TRAIT%; text-align:center; padding:12px 10px; vertical-align:middle; word-wrap:break-word; }',
+  '.doc-details { border:1px solid %TRAIT%; margin-bottom:18px; }',
+  '.doc-details-titre { background:%BANDE%; color:#fff; text-align:center; padding:7px 10px;',
   '  font-size:12px; font-weight:700; letter-spacing:0.05em; }',
   '.doc-details-corps { padding:12px 16px; text-align:center; font-size:12.5px; font-weight:600; }',
   '.doc-totaux { margin-left:auto; width:62%; text-align:right; font-size:13.5px; }',
   '.doc-totaux p { padding:3px 6px; }',
   '.doc-totaux p span { display:inline-block; min-width:90px; }',
-  '.doc-total-bande { background:#48657e; color:#fff; display:flex; justify-content:flex-end; gap:26px;',
+  '.doc-total-bande { background:%FONCE%; color:#fff; display:flex; justify-content:flex-end; gap:26px;',
   '  padding:9px 14px; font-size:15px; font-weight:800; margin-top:6px; }',
   '.doc-exoneration { font-style:italic; font-size:11px; margin-top:4px; }',
   '.doc-pied { display:flex; justify-content:space-between; align-items:flex-start; gap:30px; margin-top:26px; font-size:12px; }',
@@ -669,9 +772,20 @@ var STYLE_DOCUMENT = [
   '  font-size:12.5px; font-weight:700; letter-spacing:0.08em; }',
   '.barre-impression { position:fixed; top:12px; right:12px; }',
   '.barre-impression button { font:inherit; font-weight:700; border:none; border-radius:8px;',
-  '  padding:10px 18px; cursor:pointer; background:#5c82a3; color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.25); }',
+  '  padding:10px 18px; cursor:pointer; background:%BANDE%; color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.25); }',
   '@media print { .barre-impression { display:none; } body { padding:0; max-width:none; } }'
 ].join('\n');
+
+/** Feuille de style du document, aux couleurs choisies dans Paramètres. */
+function styleDocument(cfg) {
+  var c = /^#[0-9a-f]{6}$/i.test(cfg.couleurDocuments || '') ? cfg.couleurDocuments : '#5c82a3';
+  return STYLE_DOCUMENT_MODELE
+    .replace(/%BANDE%/g, c)
+    .replace(/%TITRE%/g, ajusterCouleur(c, 0.35))
+    .replace(/%FONCE%/g, ajusterCouleur(c, -0.25))
+    .replace(/%BADGE%/g, ajusterCouleur(c, -0.3))
+    .replace(/%TRAIT%/g, ajusterCouleur(c, 0.45));
+}
 
 function imprimerDocument(type, id) {
   var doc = (type === 'devis' ? etat.devis : etat.factures).find(function (x) { return x.id === id; });
@@ -681,7 +795,10 @@ function imprimerDocument(type, id) {
   var estFacture = type === 'facture';
   var sousTotal = totalLignes(lignes);
   var remise = nombre(doc.remise);
-  var total = nombre(doc.total) || sousTotal - remise;
+  var tva = nombre(doc.totalTVA);
+  var avecTva = tva > 0;
+  var total = nombre(doc.total) || sousTotal - remise + tva;
+  var logo = logoSrc(cfg);
 
   var html =
     // En-tête : grand titre + badge n° à gauche, logo à droite
@@ -690,7 +807,7 @@ function imprimerDocument(type, id) {
     '<div class="doc-titre">' + (estFacture ? 'FACTURE' : 'DEVIS') + '</div>' +
     '<span class="doc-badge">' + (estFacture ? 'Facture' : 'Devis') + ' n°' + echap(doc.numero) + '</span>' +
     '</div>' +
-    (cfg.logoUrl ? '<img class="logo" src="' + echap(resoudreUrl(cfg.logoUrl)) + '" alt="" onerror="this.style.display=\'none\'">' : '') +
+    (logo ? '<img class="logo" src="' + echap(logo) + '" alt="" onerror="this.style.display=\'none\'">' : '') +
     '</div>' +
 
     // Dates
@@ -720,12 +837,15 @@ function imprimerDocument(type, id) {
 
     // Tableau des prestations
     '<table><thead><tr>' +
-    '<th>DESCRIPTION</th><th>PRIX</th><th>QUANTITÉ</th><th>TOTAL</th>' +
+    (avecTva
+      ? '<th>DESCRIPTION</th><th>PRIX HT</th><th>QUANTITÉ</th><th>TVA</th><th>TOTAL HT</th>'
+      : '<th>DESCRIPTION</th><th>PRIX</th><th>QUANTITÉ</th><th>TOTAL</th>') +
     '</tr></thead><tbody>' +
     lignes.map(function (l) {
       return '<tr><td><strong>' + echap(l.desc) + '</strong></td>' +
         '<td>' + euros(l.pu) + '</td>' +
         '<td>' + String(Math.round(nombre(l.qte)) === nombre(l.qte) && nombre(l.qte) < 10 ? '0' + nombre(l.qte) : l.qte) + '</td>' +
+        (avecTva ? '<td>' + echap(nombre(l.tva)) + ' %</td>' : '') +
         '<td>' + euros(nombre(l.qte) * nombre(l.pu)) + '</td></tr>';
     }).join('') +
     '</tbody></table>' +
@@ -738,11 +858,13 @@ function imprimerDocument(type, id) {
 
     // Totaux
     '<div class="doc-totaux">' +
-    '<p><strong>Sous total :</strong> <span>' + euros(sousTotal) + '</span></p>' +
+    '<p><strong>Sous total' + (avecTva ? ' HT' : '') + ' :</strong> <span>' + euros(sousTotal) + '</span></p>' +
     (remise ? '<p><strong>Remise exceptionnelle :</strong> <span>−' + euros(remise) + '</span></p>' : '') +
-    '<p><strong>TVA (0%) :</strong> <span>0 €</span></p>' +
+    (avecTva
+      ? '<p><strong>TVA :</strong> <span>' + euros(tva) + '</span></p>'
+      : '<p><strong>TVA (0%) :</strong> <span>0 €</span></p>') +
     '<div class="doc-total-bande"><span>TOTAL :</span> <span>' + euros(total) + ' TTC</span></div>' +
-    '<p class="doc-exoneration">(' + echap(cfg.mentionTva) + ')</p>' +
+    (!avecTva && cfg.mentionTva ? '<p class="doc-exoneration">(' + echap(cfg.mentionTva) + ')</p>' : '') +
     '</div>' +
 
     // Pied : conditions + signature (devis) / paiement
@@ -772,7 +894,7 @@ function imprimerDocument(type, id) {
   fenetre.document.write(
     '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +
     '<title>' + echap(titre) + '</title>' +
-    '<style>' + STYLE_DOCUMENT + '</style></head><body>' +
+    '<style>' + styleDocument(cfg) + '</style></head><body>' +
     '<div class="barre-impression"><button onclick="window.print()">🖨️ Imprimer / enregistrer en PDF</button></div>' +
     html +
     '</body></html>'
@@ -1017,7 +1139,7 @@ function editerNote(id) {
 
     // — Dépense simple —
     '<div id="nf-section-simple"><div class="grille-form">' +
-    champ('Catégorie', '<select id="nf-categorie">' + CATEGORIES_NOTES.map(function (c) {
+    champ('Catégorie', '<select id="nf-categorie">' + categoriesNotes().map(function (c) {
       return '<option' + (n && !estKmInitial && n.categorie === c ? ' selected' : '') + '>' + c + '</option>';
     }).join('') + '</select>') +
     champ('Montant (€) *', '<input id="nf-montant" inputmode="decimal" placeholder="ex : 34,50" value="' + (n && !estKmInitial ? echap(n.montant) : '') + '">') +
@@ -1322,7 +1444,7 @@ function editerCompta() {
     '<div class="champ"><label id="cp-label-compte">Compte</label><select id="cp-compte-src">' + optionsComptes + '</select></div>' +
     '<div class="champ cache" id="cp-champ-dest"><label>Vers le compte</label><select id="cp-compte-dest">' + optionsComptes + '</select></div>' +
     '<div class="champ" id="cp-champ-mode"><label>Mode de paiement</label><select id="cp-mode">' +
-    MODES_PAIEMENT.map(function (m) { return '<option>' + m + '</option>'; }).join('') + '</select></div>' +
+    modesPaiement().map(function (m) { return '<option>' + m + '</option>'; }).join('') + '</select></div>' +
     champ('Libellé *', '<input id="cp-libelle" required placeholder="ex : Subvention mairie, versement HelloAsso juin...">', true) +
     '</div>' +
     '<div class="barre-actions">' +
@@ -1333,7 +1455,7 @@ function editerCompta() {
 
   function majFormulaire() {
     var type = $('#cp-type').value;
-    var cats = type === 'recette' ? CATEGORIES_RECETTES : CATEGORIES_DEPENSES;
+    var cats = type === 'recette' ? categoriesRecettes() : categoriesDepenses();
     $('#cp-categorie').innerHTML = cats.map(function (c) { return '<option>' + c + '</option>'; }).join('');
     $('#cp-champ-categorie').classList.toggle('cache', type === 'virement' || type === 'report');
     $('#cp-champ-dest').classList.toggle('cache', type !== 'virement');
@@ -1809,13 +1931,13 @@ function importerReleveBanque() {
               options = null;
             } else if (e.type === 'virement') {
               options = '<option value="__virement__" selected>Virement HelloAsso → Banque</option>' +
-                CATEGORIES_RECETTES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+                categoriesRecettes().map(function (c) { return '<option>' + c + '</option>'; }).join('');
             } else if (op.sens === 'credit') {
-              options = CATEGORIES_RECETTES.map(function (c) {
+              options = categoriesRecettes().map(function (c) {
                 return '<option' + (c === e.categorie ? ' selected' : '') + '>' + c + '</option>';
               }).join('');
             } else {
-              options = CATEGORIES_DEPENSES.map(function (c) {
+              options = categoriesDepenses().map(function (c) {
                 return '<option' + (c === e.categorie ? ' selected' : '') + '>' + c + '</option>';
               }).join('');
             }
@@ -1968,50 +2090,155 @@ function vueBilan(anneeChoisie) {
    Vue : paramètres (trésorier)
    --------------------------------------------------------------- */
 
+var logoEnAttente = null; // data URL du logo choisi mais pas encore enregistré
+
 function vueParametres() {
   var c = etat.config;
+  logoEnAttente = null;
   function inp(cle, label, placeholder, type) {
     return champ(label,
       '<input id="pr-' + cle + '" type="' + (type || 'text') + '" value="' + echap(c[cle] || '') + '" placeholder="' + echap(placeholder || '') + '">');
   }
+  function zone(cle, label, lignes) {
+    return champ(label, '<textarea id="pr-' + cle + '" rows="' + (lignes || 2) + '">' + echap(c[cle] || '') + '</textarea>', true);
+  }
+  function couleur(cle, label, defaut) {
+    var v = /^#[0-9a-f]{6}$/i.test(c[cle] || '') ? c[cle] : defaut;
+    return champ(label, '<input id="pr-' + cle + '" type="color" value="' + v + '">');
+  }
+  var logoActuel = logoSrc(c);
 
   $('#vue').innerHTML =
     '<div class="entete-vue"><h2>Paramètres de l\'asso</h2></div>' +
+    (premiereInstallation()
+      ? '<div class="bandeau-bienvenue"><strong>👋 Bienvenue !</strong> Complète au minimum le <strong>nom de l\'association</strong> et <strong>tes codes d\'accès</strong>, ajoute ton logo et tes couleurs si tu veux, puis clique « Enregistrer » en bas. Tout reste modifiable plus tard.</div>'
+      : '') +
     '<form id="form-parametres">' +
+
     '<div class="carte"><h3>Identité</h3><div class="grille-form">' +
-    inp('nomAsso', 'Nom de l\'association') +
+    inp('nomAsso', 'Nom de l\'association *') +
     inp('email', 'Email') +
     champ('Adresse', '<textarea id="pr-adresse" rows="2">' + echap(c.adresse || '') + '</textarea>') +
     inp('telephone', 'Téléphone') +
     inp('rna', 'N° RNA', 'W...') +
-    inp('siren', 'SIREN') +
-    inp('logoUrl', 'Logo (URL ou chemin, ex : assets/logo.png)', 'assets/logo.png') +
+    inp('siren', 'SIREN (si vous en avez un)') +
     '</div></div>' +
-    '<div class="carte"><h3>Facturation</h3><div class="grille-form">' +
+
+    '<div class="carte"><h3>Logo et couleurs</h3>' +
+    '<div class="grille-form">' +
+    '<div class="champ"><label>Logo</label>' +
+    '<div id="pr-apercu-logo" style="margin-bottom:8px">' + (logoActuel ? '<img class="apercu-logo" src="' + echap(logoActuel) + '" alt="">' : '<span class="texte-doux">Aucun logo</span>') + '</div>' +
+    '<input id="pr-logo-fichier" type="file" accept="image/*"> ' +
+    '<button type="button" class="btn btn-petit" id="pr-logo-retirer">Retirer le logo</button></div>' +
+    couleur('couleurPrimaire', 'Couleur principale (bandeau, boutons)', '#0e7a6f') +
+    couleur('couleurAccent', 'Couleur d\'accent (actions importantes)', '#f28c38') +
+    couleur('couleurDocuments', 'Couleur des devis et factures', '#5c82a3') +
+    '</div><p class="texte-doux" style="font-size:12.5px">Le logo est réduit automatiquement et apparaît sur l\'écran de connexion, le bandeau et les documents.</p></div>' +
+
+    '<div class="carte"><h3>Devis et factures</h3><div class="grille-form">' +
     inp('iban', 'IBAN', 'FR76...') +
     inp('bic', 'BIC') +
     inp('validiteDevis', 'Validité des devis', 'ex : 2 mois') +
-    inp('tauxKm', 'Taux kilométrique notes de frais (€/km)', '0.35') +
-    champ('Mention d\'exonération (sous le total)', '<input id="pr-mentionTva" value="' + echap(c.mentionTva || '') + '">') +
-    champ('Conditions de paiement par défaut (devis)', '<textarea id="pr-conditionsPaiement" rows="2">' + echap(c.conditionsPaiement || '') + '</textarea>') +
+    champ('TVA', '<select id="pr-tvaActive"><option value="non"' + (tvaActive() ? '' : ' selected') + '>Non assujettie (le cas général des assos)</option>' +
+      '<option value="oui"' + (tvaActive() ? ' selected' : '') + '>Assujettie : taux par ligne, totaux HT / TVA / TTC</option></select>') +
+    inp('tauxTvaDefaut', 'Taux de TVA par défaut (%)', '20') +
+    champ('Mention sous le total (si non assujettie)', '<input id="pr-mentionTva" value="' + echap(c.mentionTva || '') + '">') +
+    inp('formatNumeroDevis', 'Format des n° de devis', '{AAAA}{NN}') +
+    inp('formatNumeroFacture', 'Format des n° de facture', '{AAAA}{NN}') +
+    zone('conditionsPaiement', 'Conditions de paiement par défaut (devis)') +
     champ('Phrase de pied de page', '<input id="pr-mentionsPied" value="' + echap(c.mentionsPied || '') + '">') +
+    '</div><p class="texte-doux" style="font-size:12.5px">Formats de numéros : <code>{AAAA}</code> année, <code>{AA}</code> année sur 2 chiffres, <code>{NN}</code> rang (remis à 1 chaque année, autant de N que de chiffres). Ex : <code>{AAAA}{NN}</code> → 202601 · <code>F{AAAA}-{NNN}</code> → F2026-001.</p></div>' +
+
+    '<div class="carte"><h3>Compta et notes de frais</h3><div class="grille-form">' +
+    inp('tauxKm', 'Taux kilométrique notes de frais (€/km)', '0.35') +
+    inp('comptes', 'Comptes (séparés par des virgules)', 'Banque,Espèces,HelloAsso') +
+    inp('modesPaiement', 'Modes de paiement', LISTES_DEFAUT.modesPaiement) +
+    zone('categoriesRecettes', 'Catégories de recettes (séparées par des virgules)') +
+    zone('categoriesDepenses', 'Catégories de dépenses') +
+    zone('categoriesNotes', 'Catégories de notes de frais (hors frais kilométriques)') +
     '</div></div>' +
+
     '<div class="carte"><h3>Codes d\'accès</h3><div class="grille-form">' +
-    inp('codeTresorier', 'Code trésorier') +
-    inp('codeBenevole', 'Code bénévoles') +
-    '</div><p class="texte-doux" style="font-size:12.5px">⚠️ Si tu changes le code trésorier, reconnecte-toi avec le nouveau code.</p></div>' +
-    '<button type="submit" class="btn btn-primaire">💾 Enregistrer les paramètres</button>' +
+    inp('codeTresorier', 'Code trésorier *') +
+    inp('codeBenevole', 'Code bénévoles *') +
+    '</div><p class="texte-doux" style="font-size:12.5px">⚠️ Ce sont les mots de passe de l\'appli : choisis des codes personnels. Si tu changes le code trésorier, reconnecte-toi avec le nouveau.</p></div>' +
+
+    '<div class="carte"><h3>À propos</h3>' +
+    '<p>Version de l\'interface : <strong>' + VERSION_APP + '</strong> · version du serveur : <strong>' + echap(etat.versionServeur || '?') + '</strong></p>' +
+    '<p class="texte-doux" style="margin-top:6px">Logiciel libre (licence MIT) créé par <a href="https://slackestbeau.org" target="_blank" rel="noopener">S\'Lac\'K Est Beau</a>. ' +
+    '<a href="' + URL_PROJET + '/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Nouveautés et mises à jour</a> · ' +
+    '<a href="' + URL_PROJET + '" target="_blank" rel="noopener">Code source et guide</a>.</p></div>' +
+
+    '<button type="submit" class="btn btn-primaire btn-large" style="max-width:360px">💾 Enregistrer les paramètres</button>' +
     '</form>';
+
+  $('#pr-logo-fichier').addEventListener('change', async function () {
+    var fichier = this.files[0];
+    if (!fichier) return;
+    try {
+      logoEnAttente = await imageVersDataUrl(fichier, 320);
+      $('#pr-apercu-logo').innerHTML = '<img class="apercu-logo" src="' + logoEnAttente + '" alt="">';
+    } catch (e) {
+      toast('Image illisible', true);
+    }
+  });
+  $('#pr-logo-retirer').addEventListener('click', function () {
+    logoEnAttente = '';
+    $('#pr-apercu-logo').innerHTML = '<span class="texte-doux">Aucun logo</span>';
+  });
 
   $('#form-parametres').addEventListener('submit', async function (e) {
     e.preventDefault();
-    var cles = ['nomAsso', 'email', 'adresse', 'telephone', 'rna', 'siren', 'logoUrl',
-      'iban', 'bic', 'validiteDevis', 'tauxKm', 'mentionTva', 'conditionsPaiement', 'mentionsPied',
+    var cles = ['nomAsso', 'email', 'adresse', 'telephone', 'rna', 'siren',
+      'couleurPrimaire', 'couleurAccent', 'couleurDocuments',
+      'iban', 'bic', 'validiteDevis', 'tvaActive', 'tauxTvaDefaut', 'mentionTva',
+      'formatNumeroDevis', 'formatNumeroFacture', 'conditionsPaiement', 'mentionsPied',
+      'tauxKm', 'comptes', 'modesPaiement', 'categoriesRecettes', 'categoriesDepenses', 'categoriesNotes',
       'codeTresorier', 'codeBenevole'];
     var config = {};
     cles.forEach(function (k) { config[k] = $('#pr-' + k).value.trim(); });
+    if (!config.nomAsso) { toast('Le nom de l\'association est obligatoire', true); return; }
+    if (!config.codeTresorier || !config.codeBenevole) { toast('Les deux codes d\'accès sont obligatoires', true); return; }
+    if (config.codeTresorier === config.codeBenevole) { toast('Les codes trésorier et bénévole doivent être différents', true); return; }
+    if (logoEnAttente !== null) {
+      config.logoData = logoEnAttente;
+      if (logoEnAttente === '') config.logoUrl = '';
+    }
+    var codeTresorierChange = config.codeTresorier !== etat.config.codeTresorier;
     await action(function () { return Api.saveConfig(config); }, 'Paramètres enregistrés ✔');
     etat.config = Object.assign({}, etat.config, config);
+    logoEnAttente = null;
+    appliquerMarque(etat.config);
+    construireNav();
+    if (codeTresorierChange && etat.role === 'tresorier') {
+      Api.sauverSession({ code: config.codeTresorier, prenom: etat.prenom });
+    }
+    naviguer('parametres');
+  });
+}
+
+/** Réduit une image (logo) en data URL PNG, limitée pour tenir dans une cellule. */
+function imageVersDataUrl(fichier, tailleMax) {
+  return new Promise(function (resoudre, rejeter) {
+    var img = new Image();
+    var url = URL.createObjectURL(fichier);
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var essais = [tailleMax, 240, 160, 120];
+      for (var i = 0; i < essais.length; i++) {
+        var ratio = Math.min(1, essais[i] / Math.max(img.width, img.height));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * ratio));
+        canvas.height = Math.max(1, Math.round(img.height * ratio));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        var data = canvas.toDataURL('image/png');
+        if (data.length > 45000) data = canvas.toDataURL('image/jpeg', 0.85);
+        if (data.length <= 45000) return resoudre(data);
+      }
+      rejeter(new Error('Logo trop lourd'));
+    };
+    img.onerror = rejeter;
+    img.src = url;
   });
 }
 

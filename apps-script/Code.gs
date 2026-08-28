@@ -1,5 +1,8 @@
 /**
- * S'Lac'K Est Beau — Backend Apps Script (API JSON)
+ * Gestion Asso — Backend Apps Script (API JSON + interface intégrée)
+ * Devis · Factures · Compta · Notes de frais pour associations loi 1901.
+ *
+ * Logiciel libre (licence MIT), créé par S'Lac'K Est Beau (Annecy).
  *
  * À coller dans un projet Apps Script LIÉ au Google Sheet de l'asso
  * (Extensions > Apps Script depuis le tableur).
@@ -9,12 +12,13 @@
  * 2. Déployer > Nouveau déploiement > Application Web :
  *    - Exécuter en tant que : Moi
  *    - Accès : Tout le monde
- * 3. Copier l'URL du déploiement dans js/config.js du site.
+ * 3. Mode « tout Google » : ajouter le fichier Index.html au projet, l'URL
+ *    du déploiement EST l'application.
+ *    Mode « site séparé » : copier l'URL du déploiement dans js/config.js.
  */
 
-/** Version du script — visible en ouvrant l'URL /exec dans un navigateur,
- *  permet de vérifier que la dernière version est bien déployée. */
-var VERSION = '2026-08-26 notes modifiables';
+/** Version du script — visible en ouvrant l'URL /exec (ou /exec?api=1). */
+var VERSION = '2.0.0';
 
 var ONGLETS = {
   CONFIG: 'Config',
@@ -26,32 +30,46 @@ var ONGLETS = {
 };
 
 var COLONNES = {
-  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero'],
-  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement'],
+  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero', 'totalHT', 'totalTVA'],
+  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement', 'totalHT', 'totalTVA'],
   NotesFrais: ['id', 'date', 'benevole', 'saisiePar', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
   Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'compte', 'compteDest', 'mode', 'reference', 'pointee', 'auteur'],
   Benevoles: ['nom']
 };
 
+/* Valeurs par défaut d'une installation neuve. Tout se personnalise ensuite
+   depuis l'onglet Paramètres de l'application (ou directement ici, onglet Config). */
 var CONFIG_DEFAUT = {
-  nomAsso: "S'LAC'K EST BEAU",
-  adresse: '17 Rue Thomas Ruphy\n74000 Annecy',
-  email: 'Slackestbeau@gmail.com',
+  nomAsso: '',
+  adresse: '',
+  email: '',
   telephone: '',
-  siren: '941836520',
-  rna: 'W741011378',
-  iban: 'FR76 1027 8024 2300 0209 1850 394',
+  siren: '',
+  rna: '',
+  iban: '',
   bic: '',
   mentionTva: 'Association exonérée des impôts commerciaux',
   mentionsPied: 'Merci de votre confiance',
-  logoUrl: 'assets/logo.png',
+  logoUrl: '',
+  logoData: '',
+  couleurPrimaire: '#0e7a6f',
+  couleurAccent: '#f28c38',
+  couleurDocuments: '#5c82a3',
   validiteDevis: '2 mois',
+  conditionsPaiement: '',
+  tvaActive: 'non',
+  tauxTvaDefaut: '20',
+  formatNumeroDevis: '{AAAA}{NN}',
+  formatNumeroFacture: '{AAAA}{NN}',
   tauxKm: '0.35',
   comptes: 'Banque,Espèces,HelloAsso',
-  conditionsPaiement: '40% à la validation du devis\nLe solde tout compte avant la prestation',
+  modesPaiement: 'Virement,CB,Espèces,Chèque,HelloAsso,Prélèvement',
+  categoriesRecettes: 'Prestations,Adhésions,Goodies,Subventions,Dons,Buvette / événements,Autre recette',
+  categoriesDepenses: 'Matériel,Déplacements,Notes de frais,Assurance,Communication,Frais bancaires,Location / salle,Autre dépense',
+  categoriesNotes: 'Repas,Matériel,Hébergement,Autre',
   codeTresorier: 'CHANGEMOI-TRESO',
   codeBenevole: 'CHANGEMOI-BENEVOLE',
-  dossierJustificatifs: 'Justificatifs SlackEstBeau'
+  dossierJustificatifs: 'Justificatifs notes de frais'
 };
 
 /** À exécuter à l'installation, puis à re-exécuter après chaque mise à jour
@@ -101,20 +119,56 @@ function initialiser() {
 /* Points d'entrée HTTP                                                */
 /* ------------------------------------------------------------------ */
 
-function doGet() {
-  return reponse({ ok: true, message: 'API SlackEstBeau opérationnelle', version: VERSION });
+/** GET : sert l'interface intégrée (fichier Index.html présent dans le projet)
+ *  ou, à défaut / avec ?api=1, un JSON de contrôle avec la version. */
+function doGet(e) {
+  var apiSeulement = e && e.parameter && e.parameter.api === '1';
+  if (!apiSeulement) {
+    try {
+      var page = HtmlService.createHtmlOutputFromFile('Index');
+      var config = lireConfig();
+      return page
+        .setTitle((config.nomAsso ? config.nomAsso + ' — ' : '') + 'Gestion asso')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } catch (err) {
+      // Pas de fichier Index.html : mode API seule (site hébergé ailleurs)
+    }
+  }
+  return reponse({ ok: true, message: 'API Gestion Asso opérationnelle', version: VERSION });
 }
 
 function doPost(e) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  var req;
+  try { req = JSON.parse(e.postData.contents); }
+  catch (err) { return reponse({ ok: false, erreur: 'Requête illisible' }); }
+  return reponse(executer(req));
+}
+
+/** Point d'entrée de l'interface intégrée (google.script.run.api). */
+function api(json) {
+  var req;
+  try { req = JSON.parse(json); }
+  catch (err) { return JSON.stringify({ ok: false, erreur: 'Requête illisible' }); }
+  return JSON.stringify(executer(req));
+}
+
+var ACTIONS_LECTURE = ['getData', 'login', 'infosPubliques'];
+
+/** Exécute une requête avec verrou (sauf lectures) et gestion d'erreur. */
+function executer(req) {
+  var lock = null;
+  if (ACTIONS_LECTURE.indexOf(req.action) === -1) {
+    lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+  }
   try {
-    var req = JSON.parse(e.postData.contents);
-    return reponse(traiter(req));
+    _cacheObjets = {};
+    return traiter(req);
   } catch (err) {
-    return reponse({ ok: false, erreur: String(err && err.message ? err.message : err) });
+    return { ok: false, erreur: String(err && err.message ? err.message : err) };
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -130,6 +184,19 @@ function reponse(obj) {
 function traiter(req) {
   var config = lireConfig();
   var role = roleDepuisCode(req.code, config);
+
+  if (req.action === 'infosPubliques') {
+    return {
+      ok: true,
+      version: VERSION,
+      nomAsso: config.nomAsso || '',
+      logoData: config.logoData || '',
+      logoUrl: config.logoUrl || '',
+      couleurPrimaire: config.couleurPrimaire || '',
+      couleurAccent: config.couleurAccent || '',
+      installee: !!config.nomAsso && config.codeTresorier !== 'CHANGEMOI-TRESO'
+    };
+  }
 
   if (req.action === 'login') {
     if (!role) return { ok: false, erreur: 'Code invalide' };
@@ -225,6 +292,7 @@ function getData(role, prenom, config) {
   }
   return {
     ok: true,
+    version: VERSION,
     role: role,
     config: configPublique(config, role),
     devis: lireObjets(ONGLETS.DEVIS),
@@ -263,7 +331,7 @@ function ajouterBenevole(nom) {
 
 function saveDevis(devis, prenom) {
   if (!devis.id) devis.id = Utilities.getUuid();
-  if (!devis.numero) devis.numero = prochainNumero(ONGLETS.DEVIS);
+  if (!devis.numero) devis.numero = prochainNumero(ONGLETS.DEVIS, 'formatNumeroDevis');
   if (!devis.auteur) devis.auteur = prenom || '';
   upsert(ONGLETS.DEVIS, devis);
   return { ok: true, devis: devis };
@@ -285,7 +353,7 @@ function convertirDevis(id, prenom) {
 
   var facture = {
     id: Utilities.getUuid(),
-    numero: prochainNumero(ONGLETS.FACTURES),
+    numero: prochainNumero(ONGLETS.FACTURES, 'formatNumeroFacture'),
     date: dateISO(new Date()),
     auteur: prenom || devis.auteur,
     clientNom: devis.clientNom,
@@ -297,6 +365,8 @@ function convertirDevis(id, prenom) {
     details: devis.details,
     remise: devis.remise,
     total: devis.total,
+    totalHT: devis.totalHT,
+    totalTVA: devis.totalTVA,
     statut: 'envoyée',
     devisNumero: devis.numero,
     datePaiement: ''
@@ -316,7 +386,7 @@ function convertirDevis(id, prenom) {
 
 function saveFacture(facture, prenom) {
   if (!facture.id) facture.id = Utilities.getUuid();
-  if (!facture.numero) facture.numero = prochainNumero(ONGLETS.FACTURES);
+  if (!facture.numero) facture.numero = prochainNumero(ONGLETS.FACTURES, 'formatNumeroFacture');
   if (!facture.auteur) facture.auteur = prenom || '';
   upsert(ONGLETS.FACTURES, facture);
   return { ok: true, facture: facture };
@@ -478,6 +548,7 @@ function importCompta(lignes, prenom) {
 
   if (nouvelles.length) {
     sh.getRange(sh.getLastRow() + 1, 1, nouvelles.length, entetes.length).setValues(nouvelles);
+    delete _cacheObjets[ONGLETS.COMPTA];
   }
   return { ok: true, ajoutees: nouvelles.length, doublons: doublons };
 }
@@ -492,7 +563,16 @@ function feuille(nom) {
   return sh;
 }
 
+var _cacheObjets = {};
+
 function lireObjets(nomOnglet) {
+  if (_cacheObjets[nomOnglet]) return _cacheObjets[nomOnglet];
+  var objets = lireObjetsSansCache(nomOnglet);
+  _cacheObjets[nomOnglet] = objets;
+  return objets;
+}
+
+function lireObjetsSansCache(nomOnglet) {
   var sh = feuille(nomOnglet);
   var valeurs = sh.getDataRange().getValues();
   if (valeurs.length < 2) return [];
@@ -519,6 +599,7 @@ function trouver(nomOnglet, id) {
 }
 
 function upsert(nomOnglet, obj) {
+  delete _cacheObjets[nomOnglet];
   var sh = feuille(nomOnglet);
   var entetes = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   var ligne = entetes.map(function (col) {
@@ -539,6 +620,7 @@ function upsert(nomOnglet, obj) {
 }
 
 function supprimerLigne(nomOnglet, id) {
+  delete _cacheObjets[nomOnglet];
   var sh = feuille(nomOnglet);
   var ids = sh.getLastRow() > 1
     ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues()
@@ -552,21 +634,37 @@ function supprimerLigne(nomOnglet, id) {
   return { ok: false, erreur: 'Élément introuvable' };
 }
 
-/** Numérotation façon asso : année + n° de séquence (202601, 202602...),
- *  remise à zéro chaque année. Devis et factures ont chacun leur suite. */
-function prochainNumero(nomOnglet) {
-  var annee = String(new Date().getFullYear());
+/** Numérotation configurable (Config : formatNumeroDevis / formatNumeroFacture).
+ *  Jetons : {AAAA} année sur 4 chiffres, {AA} sur 2, {N}, {NN}, {NNN}... rang
+ *  (remis à 1 chaque année, complété de zéros à la largeur du jeton).
+ *  Exemples : {AAAA}{NN} → 202601 · F{AAAA}-{NNN} → F2026-001 · {AA}/{NN} → 26/01 */
+function prochainNumero(nomOnglet, cleFormat) {
+  var config = lireConfig();
+  var format = config[cleFormat] || '{AAAA}{NN}';
+  var maintenant = new Date();
+  var annee4 = String(maintenant.getFullYear());
+  var annee2 = annee4.slice(2);
+
+  // Motif de reconnaissance des numéros de l'année en cours + largeur du rang
+  var largeur = 2;
+  var motif = '^' + format.replace(/[.*+?^$\{\}()|[\]\\]/g, function (c) {
+    return /[{}]/.test(c) ? c : '\\' + c;
+  }).replace(/\{AAAA\}/g, annee4).replace(/\{AA\}/g, annee2)
+    .replace(/\{(N+)\}/, function (m, n) { largeur = n.length; return '(\\d+)'; }) + '$';
+  var regex = new RegExp(motif);
+
   var max = 0;
   lireObjets(nomOnglet).forEach(function (obj) {
-    var num = String(obj.numero || '');
-    if (num.indexOf(annee) === 0) {
-      var seq = parseInt(num.substring(annee.length), 10);
+    var m = regex.exec(String(obj.numero || ''));
+    if (m) {
+      var seq = parseInt(m[1], 10);
       if (!isNaN(seq) && seq > max) max = seq;
     }
   });
-  var suivant = String(max + 1);
-  while (suivant.length < 2) suivant = '0' + suivant;
-  return annee + suivant;
+
+  var rang = String(max + 1);
+  while (rang.length < largeur) rang = '0' + rang;
+  return format.replace(/\{AAAA\}/g, annee4).replace(/\{AA\}/g, annee2).replace(/\{N+\}/, rang);
 }
 
 function dateISO(d) {

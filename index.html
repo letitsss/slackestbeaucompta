@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>S'Lac'K Est Beau — Devis, factures & compta</title>
+  <title>Gestion asso — Devis, factures & compta</title>
   <link rel="stylesheet" href="css/style.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
 </head>
 <body>
 
   <!-- Écran de connexion -->
   <div id="ecran-login" class="ecran-login cache">
     <div class="carte-login">
-      <h1>🎪 S'Lac'K Est Beau</h1>
+      <div id="login-logo" class="login-logo"></div>
+      <h1 id="login-titre">Gestion asso</h1>
       <p class="sous-titre">Devis · Factures · Compta · Notes de frais</p>
       <form id="form-login">
         <label>Ton prénom
@@ -24,6 +25,7 @@
         <button type="submit" class="btn btn-primaire btn-large" id="btn-login">Se connecter</button>
         <p id="login-erreur" class="erreur cache"></p>
       </form>
+      <p class="credit">Logiciel libre (MIT) créé par <a href="https://slackestbeau.org" target="_blank" rel="noopener">S'Lac'K Est Beau</a> · v<span id="login-version">2.0.0</span></p>
     </div>
   </div>
 
@@ -31,7 +33,7 @@
   <div id="app" class="cache">
     <header class="topbar no-print">
       <div class="topbar-titre">
-        <strong>🎪 S'Lac'K Est Beau</strong>
+        <strong id="titre-app">Gestion asso</strong>
       </div>
       <nav id="nav" class="nav"></nav>
       <div class="topbar-user">

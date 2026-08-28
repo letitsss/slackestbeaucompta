@@ -1,118 +1,79 @@
-# 🎪 S'Lac'K Est Beau — Devis, factures, compta & notes de frais
+# 📒 Gestion asso — devis, factures, compta & notes de frais
 
-Outil de gestion pour l'association [S'Lac'K Est Beau](https://slackestbeau.org/) :
+Outil de gestion complet pour associations loi 1901, **gratuit et sans serveur** :
+tout tourne dans un Google Sheet de l'association, l'interface est servie par Google Apps Script.
 
-- **Devis** avec numérotation automatique (`202601` = année + n°, comme vos documents actuels), conversion en facture en un clic
-- **Factures** sans TVA (0 %, association exonérée des impôts commerciaux), impression / PDF reprenant la mise en page Canva de l'asso (logo, IBAN, conditions de paiement, « bon pour accord »)
-- **Notes de frais** des bénévoles avec photo du justificatif (stockée sur le Drive de l'asso)
-- **Compta** simple recettes/dépenses avec export CSV
-- **Bilan annuel** par catégorie, prêt pour l'AG
+Créé par [S'Lac'K Est Beau](https://slackestbeau.org) (slackline, Annecy) pour ses propres besoins,
+puis rendu générique et partagé sous licence libre (MIT).
 
-**100 % gratuit, sans abonnement** : interface hébergée sur GitHub Pages, données dans un
-Google Sheet de l'asso via Google Apps Script.
+## Fonctionnalités
 
-## Architecture
+- **Devis → factures** : lignes de prestation, remise, détails, conversion en un clic,
+  numérotation automatique configurable, impression / PDF avec logo et couleurs de l'asso,
+  TVA optionnelle (HT / TVA / TTC) pour les associations assujetties.
+- **Notes de frais** : dépenses simples ou frais kilométriques (indemnité au km + péages),
+  photo du justificatif stockée sur le Drive de l'asso, saisie pour soi ou pour un autre bénévole,
+  validation par le trésorier, **remboursement mensuel groupé** par bénévole.
+- **Livre de comptes** : recettes / dépenses catégorisées, plusieurs comptes (banque, espèces,
+  HelloAsso…), modes de paiement, virements internes, report de solde, **pointage bancaire**,
+  export CSV.
+- **Imports** : paiements HelloAsso (une recette par adhésion / vente) et **rapprochement
+  automatique du relevé bancaire** (pointage + création des écritures manquantes), anti-doublons.
+- **Bilan** par catégorie et par mois, prêt pour l'AG.
+- **Deux niveaux d'accès** par codes : bénévoles / trésorier. Chacun indique son prénom.
+- **Tout se personnalise dans l'appli** : nom, logo, couleurs, catégories, comptes, mentions,
+  conditions, formats de numéros, TVA, taux kilométrique, codes d'accès.
+
+## Installer pour votre association
+
+### Voie express — tout Google (recommandée, ~15 min, aucune compétence technique)
+
+Téléchargez le kit (`gestion-asso-kit-<version>.zip`, voir la
+[dernière version](https://github.com/letitsss/slackestbeaucompta/releases) ou demandez-le à
+l'asso qui vous l'a recommandé), puis suivez **`GUIDE-INSTALLATION.html`** inclus dans le kit
+(aussi lisible ici : [docs/GUIDE-INSTALLATION.html](docs/GUIDE-INSTALLATION.html)).
+
+En résumé : un Google Sheet → coller `Code.gs` et `Index.html` dans Apps Script → exécuter
+`initialiser` → déployer en application Web → ouvrir l'adresse, se connecter avec le code
+provisoire et remplir l'assistant (nom, logo, couleurs, codes d'accès). C'est tout.
+
+### Voie avancée — site sur GitHub Pages + API Apps Script
+
+Pour une adresse propre (`monasso.github.io/…`) :
+
+1. Créez le Google Sheet et collez **uniquement** `apps-script/Code.gs` (pas `Index.html`),
+   exécutez `initialiser`, déployez en application Web (*Exécuter en tant que : Moi*,
+   *Accès : Tout le monde*) et copiez l'URL `/exec`.
+2. Dupliquez ce dépôt (bouton *Use this template* ou fork), mettez l'URL dans
+   [`js/config.js`](js/config.js), activez GitHub Pages (Settings → Pages → branche `main`).
+
+Le code du site est public mais ne contient aucune donnée : tout reste dans votre Sheet / Drive.
+
+## Mettre à jour
+
+Les nouveautés sont listées dans [CHANGELOG.md](CHANGELOG.md). Mettre à jour est **facultatif**
+et ne touche ni aux données ni aux réglages : remplacer `Code.gs` (et `Index` en voie express),
+exécuter `initialiser`, puis **Déployer → Gérer les déploiements → ✏️ → Nouvelle version**.
+La version en place s'affiche dans Paramètres et sur l'écran de connexion.
+
+## Pour ceux qui diffusent l'outil
+
+- `node build.js` fabrique le kit dans `dist/` (Index.html avec CSS/JS intégrés, Code.gs, guide,
+  licence, zip) — à envoyer par WeTransfer, mail, ou à joindre à une *release* GitHub.
+- **Modèle « Faire une copie »** (encore plus simple pour les destinataires) : créez un Google Sheet
+  avec le compte de votre choix, collez-y `Code.gs` et `Index.html` du kit, exécutez `initialiser`
+  **sans rien personnaliser**, puis partagez le lien du tableur en remplaçant la fin de l'URL
+  `/edit…` par `/copy`. Chaque asso qui clique obtient sa propre copie, script inclus, et reprend
+  le guide à l'étape 4. Chaque copie est totalement indépendante.
+
+## Structure du projet
 
 ```
-Navigateur (GitHub Pages, site statique)
-        │  fetch JSON
-        ▼
-Google Apps Script (API, gratuit)
-        │
-        ▼
-Google Sheet (données) + Google Drive (justificatifs)
+apps-script/Code.gs     backend Apps Script : API JSON + interface intégrée + numérotation
+index.html, css/, js/   interface (mode site séparé) — build.js les assemble en Index.html
+docs/                   guide d'installation
+build.js                fabrique le kit distribuable dans dist/
+CHANGELOG.md, LICENSE   nouveautés, licence MIT
 ```
 
-Deux niveaux d'accès, définis par deux codes :
-
-| Rôle | Accès |
-|---|---|
-| **Bénévole** | devis, factures, ses notes de frais |
-| **Trésorier** | tout + compta, bilan, validation des notes, paramètres |
-
-Chaque personne saisit son prénom à la connexion (traçabilité de qui a créé quoi).
-
----
-
-## Installation (≈ 20 minutes, une seule fois)
-
-### Étape 1 — Le Google Sheet (les données)
-
-1. Avec le compte Google de l'asso, créer un nouveau tableur sur [sheets.new](https://sheets.new).
-   Le nommer par exemple `SlackEstBeau — Gestion`.
-2. Menu **Extensions → Apps Script**.
-3. Supprimer le contenu de `Code.gs` et coller à la place le contenu du fichier
-   [`apps-script/Code.gs`](apps-script/Code.gs) de ce dépôt. Enregistrer (💾).
-4. Dans la barre du haut, sélectionner la fonction **`initialiser`** puis cliquer **Exécuter**.
-   Autoriser l'accès quand Google le demande (⚠️ écran « application non validée » :
-   cliquer *Paramètres avancés → Accéder au projet* — c'est votre propre script, c'est normal).
-   → Les onglets `Config`, `Devis`, `Factures`, `NotesFrais`, `Compta` sont créés.
-5. Dans l'onglet **Config** du tableur, personnaliser tout de suite :
-   - `codeTresorier` et `codeBenevole` → **choisir vos propres codes** (ce sont les mots de passe) ;
-   - adresse, email, IBAN, RNA/SIRET, URL du logo… (modifiable plus tard depuis l'appli, onglet Paramètres).
-
-### Étape 2 — Déployer l'API
-
-1. Toujours dans Apps Script : **Déployer → Nouveau déploiement**.
-2. Type : **Application Web** (icône engrenage si besoin).
-3. Réglages :
-   - *Exécuter en tant que* : **Moi**
-   - *Qui a accès* : **Tout le monde** (l'accès aux données reste protégé par vos codes)
-4. **Déployer**, puis copier l'**URL de l'application Web** (elle se termine par `/exec`).
-
-> ℹ️ Si vous modifiez `Code.gs` plus tard : **Déployer → Gérer les déploiements → ✏️ →
-> Version : Nouvelle version → Déployer** (sinon les changements ne sont pas pris en compte).
-
-### Étape 3 — Configurer le site
-
-Dans le fichier [`js/config.js`](js/config.js), remplacer la valeur par votre URL :
-
-```js
-var API_URL = 'https://script.google.com/macros/s/XXXXX/exec';
-```
-
-### Étape 3 bis — Le logo
-
-Exporter le logo depuis Canva en **PNG (fond transparent)** et l'enregistrer dans le projet
-sous **`assets/logo.png`** — il apparaîtra en haut à droite des devis et factures.
-(Un autre chemin ou une URL se règle dans l'appli, onglet Paramètres.)
-
-### Étape 4 — Publier sur GitHub Pages
-
-1. Créer un dépôt sur GitHub (par ex. `slackestbeau-gestion`, public) et pousser ce dossier :
-   ```bash
-   git remote add origin https://github.com/VOTRE-COMPTE/slackestbeau-gestion.git
-   git push -u origin main
-   ```
-2. Sur GitHub : **Settings → Pages → Branch : `main` / dossier `/ (root)` → Save**.
-3. Deux minutes plus tard, le site est en ligne sur
-   `https://VOTRE-COMPTE.github.io/slackestbeau-gestion/`.
-
-Partager ce lien + le code bénévole aux membres concernés. C'est tout. 🎉
-
-> Le code du site est public sur GitHub, mais il ne contient **aucune donnée** :
-> devis, factures, compta et justificatifs restent dans le Google Sheet / Drive de l'asso.
-
----
-
-## Utilisation au quotidien
-
-- **Bénévole** : se connecte avec son prénom + code bénévole → crée un devis →
-  l'imprime en PDF (bouton 🖨️, puis « Enregistrer en PDF ») → le client accepte →
-  « Convertir en facture ». Pour ses frais : nouvelle note + photo du ticket.
-- **Trésorier** : marque les factures payées (la recette part automatiquement en compta),
-  valide puis rembourse les notes de frais (la dépense part automatiquement en compta),
-  saisit les autres écritures (subventions, adhésions, achats…), consulte le bilan,
-  exporte le CSV pour l'AG.
-- Le trésorier peut aussi corriger n'importe quoi **directement dans le Google Sheet** —
-  l'appli relit les données à chaque chargement.
-
-## Dépannage
-
-| Problème | Solution |
-|---|---|
-| « L'URL de l'API n'est pas configurée » | Éditer `js/config.js` (étape 3) |
-| « Code invalide » | Vérifier les codes dans l'onglet `Config` du Sheet |
-| Modif du script sans effet | Redéployer une **nouvelle version** (voir étape 2) |
-| « Onglet manquant » | Exécuter la fonction `initialiser` dans Apps Script |
-| Le justificatif ne s'envoie pas | Fichier trop lourd → réessayer avec une photo (compressée auto) |
+Contributions et retours bienvenus via les *issues* GitHub.

@@ -1,6 +1,7 @@
 /* ================================================================
-   S'Lac'K Est Beau — feuille de style
-   Thème : lac & montagne (teal profond + orange highline)
+   Gestion asso — feuille de style
+   Les couleurs --primaire / --accent sont remplacées à l'exécution
+   par celles choisies dans Paramètres (voir appliquerTheme).
    ================================================================ */
 
 :root {
@@ -55,6 +56,10 @@ body {
 }
 
 .carte-login h1 { font-size: 26px; margin-bottom: 4px; }
+.login-logo img { max-height: 90px; max-width: 200px; object-fit: contain; margin-bottom: 10px; }
+.carte-login .credit { margin-top: 18px; font-size: 11.5px; color: var(--texte-doux); text-align: center; }
+.carte-login .credit a { color: inherit; }
+.logo-topbar { height: 28px; width: auto; vertical-align: middle; margin-right: 6px; border-radius: 4px; background: #fff; padding: 1px; }
 .carte-login .sous-titre { color: var(--texte-doux); margin-bottom: 24px; font-size: 14px; }
 .carte-login form { text-align: left; }
 .carte-login label { display: block; margin-bottom: 14px; font-weight: 600; font-size: 13px; }
@@ -229,6 +234,8 @@ input:focus, select:focus, textarea:focus {
 
 /* ---------------- Lignes de devis ---------------- */
 
+.ligne-devis.avec-tva { grid-template-columns: 1fr 80px 100px 70px 100px 36px; }
+
 .ligne-devis {
   display: grid;
   grid-template-columns: 1fr 90px 110px 110px 36px;
@@ -361,6 +368,10 @@ input:focus, select:focus, textarea:focus {
 
 .filtres { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .filtres select, .filtres input { width: auto; }
+
+.apercu-logo { max-height: 80px; max-width: 200px; object-fit: contain; border: 1px solid var(--bordure); border-radius: 8px; padding: 6px; background: #fff; }
+input[type="color"] { width: 60px; height: 38px; padding: 2px; cursor: pointer; }
+.bandeau-bienvenue { background: var(--primaire-clair); border-left: 4px solid var(--primaire); border-radius: var(--rayon); padding: 14px 18px; margin-bottom: 18px; }
 
 /* ================================================================
    NOTE : les devis/factures imprimables s'ouvrent dans leur propre
