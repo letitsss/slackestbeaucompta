@@ -3,3 +3,6 @@
 *.csv
 *.xlsx
 *.ofx
+
+# Kit construit par build.js (appartient à la branche main)
+dist/
