@@ -14,7 +14,7 @@
 
 /** Version du script — visible en ouvrant l'URL /exec dans un navigateur,
  *  permet de vérifier que la dernière version est bien déployée. */
-var VERSION = '2026-08-26 notes modifiables';
+var VERSION = '2026-09-02 remises et motifs';
 
 var ONGLETS = {
   CONFIG: 'Config',
