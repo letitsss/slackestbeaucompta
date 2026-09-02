@@ -5,6 +5,17 @@ Pour mettre à jour votre installation : téléchargez le dernier kit, remplacez
 puis **Déployer → Gérer les déploiements → ✏️ → Nouvelle version → Déployer**.
 Vos données et vos réglages sont conservés.
 
+## 2.1.0 — 2 septembre 2026 · remises d'imprévu et impression soignée
+
+- **Facture modifiable tant qu'elle n'est pas payée** (bouton ✏️ Modifier) :
+  lignes, coordonnées, détails, remises — pour gérer les imprévus (météo,
+  annulation partielle...) sans refaire le document.
+- **Deux remises avec motif** sur devis et factures : « Remise exceptionnelle »
+  et « Autre remise », chacune avec son motif (obligatoire dès qu'un montant
+  est saisi sur une facture) affiché sur le document imprimé.
+- **Impression des totaux refaite** : libellés et montants alignés en colonnes,
+  motifs en italique sous chaque remise, blocs jamais coupés entre deux pages.
+
 ## 2.0.0 — 26 août 2026 · version distribuable
 
 - **Installation « tout Google »** : l'interface est servie directement par Apps

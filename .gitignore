@@ -6,3 +6,7 @@
 
 # Kit construit par build.js
 dist/
+
+# Documents internes de l'asso (jamais sur GitHub)
+*.docx
+*.pdf

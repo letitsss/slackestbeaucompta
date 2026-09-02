@@ -18,7 +18,7 @@
  */
 
 /** Version du script — visible en ouvrant l'URL /exec (ou /exec?api=1). */
-var VERSION = '2.0.0';
+var VERSION = '2.1.0';
 
 var ONGLETS = {
   CONFIG: 'Config',
@@ -30,8 +30,8 @@ var ONGLETS = {
 };
 
 var COLONNES = {
-  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'conditions', 'factureNumero', 'totalHT', 'totalTVA'],
-  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'total', 'statut', 'devisNumero', 'datePaiement', 'totalHT', 'totalTVA'],
+  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'remise2', 'motifRemise2', 'total', 'statut', 'conditions', 'factureNumero', 'totalHT', 'totalTVA'],
+  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'remise2', 'motifRemise2', 'total', 'statut', 'devisNumero', 'datePaiement', 'totalHT', 'totalTVA'],
   NotesFrais: ['id', 'date', 'benevole', 'saisiePar', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
   Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'compte', 'compteDest', 'mode', 'reference', 'pointee', 'auteur'],
   Benevoles: ['nom']
@@ -364,6 +364,9 @@ function convertirDevis(id, prenom) {
     lignes: devis.lignes,
     details: devis.details,
     remise: devis.remise,
+    motifRemise: devis.motifRemise,
+    remise2: devis.remise2,
+    motifRemise2: devis.motifRemise2,
     total: devis.total,
     totalHT: devis.totalHT,
     totalTVA: devis.totalTVA,
