@@ -342,6 +342,8 @@ function editerDevis(id) {
     champ('Détails de la prestation (encadré sur le document)', '<textarea id="dv-details" rows="2" placeholder="ex : 2 bénévoles de l\'association installeront 3 racks de slackline et assureront l\'encadrement des initiations de 10h à 18h">' + echap(d ? d.details : '') + '</textarea>', true) +
     champ('Remise exceptionnelle (€)', '<input id="dv-remise" inputmode="decimal" value="' + echap(d && nombre(d.remise) ? d.remise : '') + '" placeholder="ex : 250">') +
     champ('Motif de la remise (affiché sur le document)', '<input id="dv-motif" value="' + echap(d ? d.motifRemise : '') + '" placeholder="ex : météo défavorable, annulation partielle">') +
+    champ('Autre remise (€)', '<input id="dv-remise2" inputmode="decimal" value="' + echap(d && nombre(d.remise2) ? d.remise2 : '') + '" placeholder="ex : 50">') +
+    champ('Motif de l\'autre remise', '<input id="dv-motif2" value="' + echap(d ? d.motifRemise2 : '') + '" placeholder="ex : geste partenaire">') +
     champ('Conditions de paiement (sur le devis)', '<textarea id="dv-conditions" rows="2">' + echap(d ? d.conditions : conditionsDefaut) + '</textarea>') +
     '</div>' +
     '<div class="total-general"><span class="texte-doux" style="font-size:14px">Sous-total : <span id="dv-soustotal">0,00 €</span> · </span>Total : <span id="dv-total">0,00 €</span> TTC</div>' +
@@ -355,12 +357,18 @@ function editerDevis(id) {
   conteneur.innerHTML = '';
   lignes.forEach(function (l) { ajouterLigneDevis(l); });
   $('#dv-remise').addEventListener('input', recalculerTotalDevis);
+  $('#dv-remise2').addEventListener('input', recalculerTotalDevis);
   recalculerTotalDevis();
 
   $('#form-devis').addEventListener('submit', async function (e) {
     e.preventDefault();
     var lignesSaisies = lireLignesDevis();
     var remise = nombre($('#dv-remise').value);
+    var remise2 = nombre($('#dv-remise2').value);
+    if (remise2 && !$('#dv-motif2').value.trim()) {
+      toast('Indique le motif de l\'autre remise : il apparaîtra sur le document', true);
+      return;
+    }
     var devis = {
       id: d ? d.id : '',
       numero: d ? d.numero : '',
@@ -375,7 +383,9 @@ function editerDevis(id) {
       details: $('#dv-details').value.trim(),
       remise: remise,
       motifRemise: $('#dv-motif').value.trim(),
-      total: totalLignes(lignesSaisies) - remise,
+      remise2: remise2,
+      motifRemise2: $('#dv-motif2').value.trim(),
+      total: totalLignes(lignesSaisies) - remise - remise2,
       statut: $('#dv-statut').value,
       conditions: $('#dv-conditions').value.trim(),
       factureNumero: d ? d.factureNumero : ''
@@ -441,8 +451,9 @@ function recalculerTotalDevis() {
   });
   var sousTotal = totalLignes(lireLignesDevis());
   var remise = $('#dv-remise') ? nombre($('#dv-remise').value) : 0;
+  var remise2 = $('#dv-remise2') ? nombre($('#dv-remise2').value) : 0;
   if ($('#dv-soustotal')) $('#dv-soustotal').textContent = euros(sousTotal);
-  if ($('#dv-total')) $('#dv-total').textContent = euros(sousTotal - remise);
+  if ($('#dv-total')) $('#dv-total').textContent = euros(sousTotal - remise - remise2);
 }
 
 function detailDevis(id) {
@@ -460,6 +471,7 @@ function detailDevis(id) {
     '</tbody></table></div>' +
     (d.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(d.details) + '</p>' : '') +
     (nombre(d.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle' + (d.motifRemise ? ' (' + echap(d.motifRemise) + ')' : '') + ' : −' + euros(d.remise) + '</p>' : '') +
+    (nombre(d.remise2) ? '<p style="text-align:right;margin-top:4px">Autre remise' + (d.motifRemise2 ? ' (' + echap(d.motifRemise2) + ')' : '') + ' : −' + euros(d.remise2) + '</p>' : '') +
     '<div class="total-general">Total : ' + euros(d.total) + ' TTC</div>' +
     (d.factureNumero ? '<p class="texte-doux">✅ Facturé — facture ' + echap(d.factureNumero) + '</p>' : '') +
     '<div class="barre-actions">' +
@@ -592,6 +604,7 @@ function detailFacture(id) {
     '</tbody></table></div>' +
     (f.details ? '<p class="texte-doux" style="margin-top:8px">📋 ' + echap(f.details) + '</p>' : '') +
     (nombre(f.remise) ? '<p style="text-align:right;margin-top:8px">Remise exceptionnelle' + (f.motifRemise ? ' (' + echap(f.motifRemise) + ')' : '') + ' : −' + euros(f.remise) + '</p>' : '') +
+    (nombre(f.remise2) ? '<p style="text-align:right;margin-top:4px">Autre remise' + (f.motifRemise2 ? ' (' + echap(f.motifRemise2) + ')' : '') + ' : −' + euros(f.remise2) + '</p>' : '') +
     '<div class="total-general">Total : ' + euros(f.total) + ' TTC</div>' +
     '<div class="barre-actions">' +
     '<button class="btn btn-primaire" onclick="imprimerDocument(\'facture\', \'' + f.id + '\')">🖨️ Imprimer / PDF</button>' +
@@ -632,6 +645,8 @@ function editerFacture(id) {
     champ('Détails de la prestation (encadré sur le document)', '<textarea id="dv-details" rows="2">' + echap(f.details) + '</textarea>', true) +
     champ('Remise exceptionnelle (€)', '<input id="dv-remise" inputmode="decimal" value="' + echap(nombre(f.remise) ? f.remise : '') + '" placeholder="ex : 250">') +
     champ('Motif de la remise (affiché sur la facture)', '<input id="dv-motif" value="' + echap(f.motifRemise) + '" placeholder="ex : météo défavorable, annulation partielle">') +
+    champ('Autre remise (€)', '<input id="dv-remise2" inputmode="decimal" value="' + echap(nombre(f.remise2) ? f.remise2 : '') + '" placeholder="ex : 50">') +
+    champ('Motif de l\'autre remise', '<input id="dv-motif2" value="' + echap(f.motifRemise2) + '" placeholder="ex : geste partenaire">') +
     '</div>' +
     '<div class="total-general"><span class="texte-doux" style="font-size:14px">Sous-total : <span id="dv-soustotal">0,00 €</span> · </span>Total : <span id="dv-total">0,00 €</span> TTC</div>' +
     '<div class="barre-actions">' +
@@ -643,12 +658,18 @@ function editerFacture(id) {
   $('#dv-lignes').innerHTML = '';
   lignes.forEach(function (l) { ajouterLigneDevis(l); });
   $('#dv-remise').addEventListener('input', recalculerTotalDevis);
+  $('#dv-remise2').addEventListener('input', recalculerTotalDevis);
   recalculerTotalDevis();
 
   $('#form-devis').addEventListener('submit', async function (e) {
     e.preventDefault();
     var lignesSaisies = lireLignesDevis();
     var remise = nombre($('#dv-remise').value);
+    var remise2 = nombre($('#dv-remise2').value);
+    if (remise2 && !$('#dv-motif2').value.trim()) {
+      toast('Indique le motif de l\'autre remise : il apparaîtra sur la facture', true);
+      return;
+    }
     if (remise && !$('#dv-motif').value.trim()) {
       toast('Indique le motif de la remise : il apparaîtra sur la facture', true);
       return;
@@ -663,7 +684,9 @@ function editerFacture(id) {
       details: $('#dv-details').value.trim(),
       remise: remise,
       motifRemise: $('#dv-motif').value.trim(),
-      total: totalLignes(lignesSaisies) - remise
+      remise2: remise2,
+      motifRemise2: $('#dv-motif2').value.trim(),
+      total: totalLignes(lignesSaisies) - remise - remise2
     });
     var res = await action(function () { return Api.saveFacture(facture); }, 'Facture modifiée ✔');
     fermerModale();
@@ -726,12 +749,15 @@ var STYLE_DOCUMENT = [
   '.doc-details-titre { background:#5c82a3; color:#fff; text-align:center; padding:7px 10px;',
   '  font-size:12px; font-weight:700; letter-spacing:0.05em; }',
   '.doc-details-corps { padding:12px 16px; text-align:center; font-size:12.5px; font-weight:600; }',
-  '.doc-totaux { margin-left:auto; width:62%; text-align:right; font-size:13.5px; }',
-  '.doc-totaux p { padding:3px 6px; }',
-  '.doc-totaux p span { display:inline-block; min-width:90px; }',
+  '.doc-totaux { margin-left:auto; width:72%; max-width:125mm; font-size:13.5px; }',
+  '.doc-totaux .ligne-total { display:flex; justify-content:flex-end; align-items:baseline; gap:16px; padding:3px 6px; }',
+  '.doc-totaux .ligne-total .libelle-total { text-align:right; }',
+  '.doc-totaux .ligne-total .montant-total { min-width:96px; text-align:right; white-space:nowrap; }',
+  '.doc-motif { font-style:italic; font-size:11px; color:#444; text-align:right; padding:0 6px 4px; }',
+  'table tr, .doc-details, .doc-totaux, .doc-pied, .doc-merci { page-break-inside:avoid; break-inside:avoid; }',
   '.doc-total-bande { background:#48657e; color:#fff; display:flex; justify-content:flex-end; gap:26px;',
   '  padding:9px 14px; font-size:15px; font-weight:800; margin-top:6px; }',
-  '.doc-exoneration { font-style:italic; font-size:11px; margin-top:4px; }',
+  '.doc-exoneration { font-style:italic; font-size:11px; margin-top:4px; text-align:right; }',
   '.doc-pied { display:flex; justify-content:space-between; align-items:flex-start; gap:30px; margin-top:26px; font-size:12px; }',
   '.doc-signature { text-align:center; min-width:220px; }',
   '.doc-ligne-signature { border-bottom:1.5px solid #3d4a55; margin-top:52px; }',
@@ -751,7 +777,13 @@ function imprimerDocument(type, id) {
   var estFacture = type === 'facture';
   var sousTotal = totalLignes(lignes);
   var remise = nombre(doc.remise);
-  var total = nombre(doc.total) || sousTotal - remise;
+  var remise2 = nombre(doc.remise2);
+  var total = nombre(doc.total) || sousTotal - remise - remise2;
+
+  function ligneTotal(libelle, montant) {
+    return '<div class="ligne-total"><span class="libelle-total"><strong>' + libelle + '</strong></span>' +
+      '<span class="montant-total">' + montant + '</span></div>';
+  }
 
   var html =
     // En-tête : grand titre + badge n° à gauche, logo à droite
@@ -808,9 +840,16 @@ function imprimerDocument(type, id) {
 
     // Totaux
     '<div class="doc-totaux">' +
-    '<p><strong>Sous total :</strong> <span>' + euros(sousTotal) + '</span></p>' +
-    (remise ? '<p><strong>Remise exceptionnelle' + (doc.motifRemise ? ' (' + echap(doc.motifRemise) + ')' : '') + ' :</strong> <span>−' + euros(remise) + '</span></p>' : '') +
-    '<p><strong>TVA (0%) :</strong> <span>0 €</span></p>' +
+    ligneTotal('Sous total :', euros(sousTotal)) +
+    (remise
+      ? ligneTotal('Remise exceptionnelle :', '−' + euros(remise)) +
+        (doc.motifRemise ? '<div class="doc-motif">' + echap(doc.motifRemise) + '</div>' : '')
+      : '') +
+    (remise2
+      ? ligneTotal('Autre remise :', '−' + euros(remise2)) +
+        (doc.motifRemise2 ? '<div class="doc-motif">' + echap(doc.motifRemise2) + '</div>' : '')
+      : '') +
+    ligneTotal('TVA (0%) :', '0 €') +
     '<div class="doc-total-bande"><span>TOTAL :</span> <span>' + euros(total) + ' TTC</span></div>' +
     '<p class="doc-exoneration">(' + echap(cfg.mentionTva) + ')</p>' +
     '</div>' +

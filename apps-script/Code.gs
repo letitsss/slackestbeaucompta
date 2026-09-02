@@ -26,8 +26,8 @@ var ONGLETS = {
 };
 
 var COLONNES = {
-  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'total', 'statut', 'conditions', 'factureNumero'],
-  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'total', 'statut', 'devisNumero', 'datePaiement'],
+  Devis: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'remise2', 'motifRemise2', 'total', 'statut', 'conditions', 'factureNumero'],
+  Factures: ['id', 'numero', 'date', 'auteur', 'clientNom', 'clientTel', 'clientAdresse', 'clientEmail', 'objet', 'lignes', 'details', 'remise', 'motifRemise', 'remise2', 'motifRemise2', 'total', 'statut', 'devisNumero', 'datePaiement'],
   NotesFrais: ['id', 'date', 'benevole', 'saisiePar', 'type', 'description', 'categorie', 'depart', 'arrivee', 'km', 'essence', 'peages', 'indemniteKm', 'montant', 'justificatifUrl', 'statut', 'commentaire'],
   Compta: ['id', 'date', 'type', 'categorie', 'libelle', 'montant', 'compte', 'compteDest', 'mode', 'reference', 'pointee', 'auteur'],
   Benevoles: ['nom']
@@ -297,6 +297,8 @@ function convertirDevis(id, prenom) {
     details: devis.details,
     remise: devis.remise,
     motifRemise: devis.motifRemise,
+    remise2: devis.remise2,
+    motifRemise2: devis.motifRemise2,
     total: devis.total,
     statut: 'envoyée',
     devisNumero: devis.numero,
